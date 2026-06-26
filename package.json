@@ -1,27 +1,33 @@
 {
-  "name": "seiko-dashboard",
-  "version": "0.1.0",
+  "name": "seiko-dsr-dashboard",
+  "version": "1.0.0",
+  "description": "Seiko Sales Data Dashboard with file upload, validation, and analytics",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint",
+    "export": "next export"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.108.2",
-    "next": "16.2.9",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "next": "^14.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@supabase/supabase-js": "^2.38.0",
+    "uuid": "^9.0.0",
+    "bcryptjs": "^2.4.3"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.9",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.0.0",
+    "eslint": "^8.0.0",
+    "eslint-config-next": "^14.0.0"
+  },
+  "engines": {
+    "node": "18.x",
+    "npm": "9.x"
   }
 }
