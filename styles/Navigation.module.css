@@ -1,0 +1,109 @@
+.navbar {
+  background: #ffffff;
+  border-bottom: 1px solid #e0e0e0;
+  padding: 0.75rem 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.navContainer {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.navBrand h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #1a1a1a;
+  min-width: 250px;
+}
+
+.navMenu {
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 2rem;
+  flex: 1;
+  margin-left: 2rem;
+}
+
+.navMenu li {
+  margin: 0;
+  padding: 0;
+}
+
+.navMenu a {
+  text-decoration: none;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 0.5rem 0;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+  display: block;
+}
+
+.navMenu a:hover {
+  color: #1a1a1a;
+  border-bottom-color: #378add;
+}
+
+.navMenu a.active {
+  color: #378add;
+  border-bottom-color: #378add;
+}
+
+.navRight {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.roleLabel {
+  font-size: 12px;
+  font-weight: 600;
+  background: #f0f0f0;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  color: #666;
+}
+
+.logoutBtn {
+  background: #e24b4a;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.logoutBtn:hover {
+  background: #c23a39;
+}
+
+@media (max-width: 768px) {
+  .navMenu {
+    gap: 1rem;
+    margin-left: 1rem;
+    font-size: 12px;
+  }
+
+  .navBrand h1 {
+    font-size: 16px;
+    min-width: auto;
+  }
+
+  .roleLabel {
+    display: none;
+  }
+}
