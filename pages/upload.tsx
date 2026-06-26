@@ -130,7 +130,6 @@ export default function Upload() {
           headers: {
             Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
             "Content-Type": "application/json",
-            apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({
             new_entries_count: newEntries.length,
