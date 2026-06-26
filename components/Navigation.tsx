@@ -26,43 +26,48 @@ export default function Navigation({ role }: NavigationProps) {
 
         <ul className={styles.navMenu}>
           <li>
-            <Link href="/dashboard">
-              <a className={isActive("/dashboard") ? styles.active : ""}>
-                📊 Summary
-              </a>
+            <Link
+              href="/dashboard"
+              className={isActive("/dashboard") ? styles.active : ""}
+            >
+              📊 Summary
             </Link>
           </li>
 
           <li>
-            <Link href="/analytics">
-              <a className={isActive("/analytics") ? styles.active : ""}>
-                📈 Analytics
-              </a>
+            <Link
+              href="/analytics"
+              className={isActive("/analytics") ? styles.active : ""}
+            >
+              📈 Analytics
             </Link>
           </li>
 
           <li>
-            <Link href="/store-performance">
-              <a className={isActive("/store-performance") ? styles.active : ""}>
-                🏪 Store Performance
-              </a>
+            <Link
+              href="/store-performance"
+              className={isActive("/store-performance") ? styles.active : ""}
+            >
+              🏪 Store Performance
             </Link>
           </li>
 
           <li>
-            <Link href="/upload">
-              <a className={isActive("/upload") ? styles.active : ""}>
-                📤 Upload
-              </a>
+            <Link
+              href="/upload"
+              className={isActive("/upload") ? styles.active : ""}
+            >
+              📤 Upload
             </Link>
           </li>
 
           {role === "admin" && (
             <li>
-              <Link href="/approvals">
-                <a className={isActive("/approvals") ? styles.active : ""}>
-                  ✅ Approvals
-                </a>
+              <Link
+                href="/approvals"
+                className={isActive("/approvals") ? styles.active : ""}
+              >
+                ✅ Approvals
               </Link>
             </li>
           )}
