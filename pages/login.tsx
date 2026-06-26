@@ -1,4 +1,3 @@
-// pages/login.tsx (React/Next.js)
 import React, { useState } from "react";
 import { useRouter } from "next/router";
 import styles from "../styles/Auth.module.css";
@@ -19,62 +18,57 @@ export default function Login() {
       const response = await fetch("/api/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "login", email, password }),
+        body: JSON.stringify({ email, password }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || "Login failed");
+        setError(data.error || "Invalid credentials");
         setLoading(false);
         return;
       }
 
-      // Store session token
-      localStorage.setItem("sessionToken", data.sessionToken);
+      // Store session and role
+      localStorage.setItem("sessionToken", data.token);
+      localStorage.setItem("userRole", data.role);
       localStorage.setItem("userEmail", data.email);
-      localStorage.setItem("storeCode", data.storeCode);
 
-      router.push("/upload");
+      // Redirect to dashboard
+      router.push("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      setError("Network error. Please try again.");
       setLoading(false);
     }
   };
 
   return (
     <div className={styles.container}>
-      <div className={styles.card}>
+      <div className={styles.formBox}>
         <h1 className={styles.title}>Seiko DSR Dashboard</h1>
-        <p className={styles.subtitle}>Sales Data Upload & Management</p>
+        <p className={styles.subtitle}>Store Manager & Admin Login</p>
 
         <form onSubmit={handleLogin} className={styles.form}>
           <div className={styles.formGroup}>
-            <label htmlFor="email" className={styles.label}>
-              Email Address
-            </label>
+            <label htmlFor="email">Email</label>
             <input
               id="email"
               type="email"
+              placeholder="Enter your email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              className={styles.input}
               required
             />
           </div>
 
           <div className={styles.formGroup}>
-            <label htmlFor="password" className={styles.label}>
-              Password
-            </label>
+            <label htmlFor="password">Password</label>
             <input
               id="password"
               type="password"
+              placeholder="Enter your password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className={styles.input}
               required
             />
           </div>
@@ -83,15 +77,17 @@ export default function Login() {
 
           <button
             type="submit"
+            className={styles.button}
             disabled={loading}
-            className={styles.submitButton}
           >
             {loading ? "Logging in..." : "Login"}
           </button>
         </form>
 
         <div className={styles.footer}>
-          <p>Contact your administrator for account access</p>
+          <p>Test Users:</p>
+          <p>Manager: manager@seiko.com / password</p>
+          <p>Admin: admin@seiko.com / password</p>
         </div>
       </div>
     </div>
