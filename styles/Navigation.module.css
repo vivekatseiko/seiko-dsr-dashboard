@@ -48,6 +48,7 @@
   border-bottom: 2px solid transparent;
   transition: all 0.2s ease;
   display: block;
+  cursor: pointer;
 }
 
 .navMenu a:hover {
@@ -64,6 +65,7 @@
   display: flex;
   align-items: center;
   gap: 1rem;
+  margin-left: auto;
 }
 
 .roleLabel {
