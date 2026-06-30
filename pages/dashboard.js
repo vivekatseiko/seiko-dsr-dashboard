@@ -369,25 +369,32 @@ export default function Dashboard() {
                 <Recharts.LineChart
                   width={1200}
                   height={400}
-                  data={enhancedData}
+                  data={trendData}
                   margin={{ top: 5, right: 30, left: 0, bottom: 80 }}
                 >
                   {/* Background rectangles for weekends */}
-                  {weekendAreas.map((area, idx) => (
-                    <Recharts.ReferenceArea
-                      key={`weekend-area-${idx}`}
-                      x1={area.startDate}
-                      x2={area.endDate}
-                      fill="#ffb366"
-                      fillOpacity={0.7}
-                      isFront={false}
-                    />
-                  ))}
+                  {weekendAreas.map((area, idx) => {
+                    const startIdx = trendData.findIndex(d => d.formattedDate === area.startDate);
+                    const endIdx = trendData.findIndex(d => d.formattedDate === area.endDate);
+                    
+                    if (startIdx === -1 || endIdx === -1) return null;
+                    
+                    return (
+                      <Recharts.ReferenceArea
+                        key={`weekend-area-${idx}`}
+                        x1={trendData[Math.max(0, startIdx - 1)]?.formattedDate}
+                        x2={trendData[Math.min(trendData.length - 1, endIdx + 1)]?.formattedDate}
+                        fill="#ffb366"
+                        fillOpacity={0.7}
+                        isFront={false}
+                      />
+                    );
+                  })}
 
                   <Recharts.CartesianGrid strokeDasharray="3 3" />
                   <Recharts.XAxis
                     dataKey="formattedDate"
-                    interval={Math.max(0, Math.ceil(enhancedData.length / 24) - 1)}
+                    interval={Math.max(0, Math.ceil(trendData.length / 12) - 1)}
                     angle={-45}
                     textAnchor="end"
                     height={80}
@@ -397,7 +404,6 @@ export default function Dashboard() {
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
                         const d = payload[0].payload;
-                        if (d.isVirtual) return null;
                         const dayType = d.isWeekend ? "Weekend 🌅" : "Weekday 📅";
                         return (
                           <div style={{
@@ -427,7 +433,7 @@ export default function Dashboard() {
                     connectNulls={false}
                     dot={(props) => {
                       const { cx, cy, payload } = props;
-                      if (!payload || payload.isVirtual) return null;
+                      if (!payload) return null;
                       if (payload.isWeekend) {
                         return <circle cx={cx} cy={cy} r={6} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.9} strokeWidth={2} stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
                       }
