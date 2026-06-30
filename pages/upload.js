@@ -48,6 +48,20 @@ export default function Upload() {
     );
   };
 
+  const isHeaderValue = (value) => {
+    if (!value) return false;
+    const str = value.toString().toLowerCase().trim();
+    return (
+      str === "date" ||
+      str === "transaction date" ||
+      str === "invoice date" ||
+      str === "system invoice number" ||
+      str === "model number" ||
+      str === "qty" ||
+      str === "quantity"
+    );
+  };
+
   const parseDate = (dateValue) => {
     if (!dateValue) return "";
 
@@ -159,10 +173,22 @@ export default function Upload() {
                     continue;
                   }
 
-                  const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[0]);
+                  let dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[dateColumnIndex]);
 
                   if (dataRows.length === 0) {
                     console.log(`Skipping sheet "${sheetName}" - no data rows after headers`);
+                    skippedSheets++;
+                    continue;
+                  }
+
+                  // Remove header row if it was accidentally included
+                  if (isHeaderValue(dataRows[0][dateColumnIndex])) {
+                    console.log(`Removing duplicate header row from data`);
+                    dataRows = dataRows.slice(1);
+                  }
+
+                  if (dataRows.length === 0) {
+                    console.log(`Skipping sheet "${sheetName}" - no data rows after removing headers`);
                     skippedSheets++;
                     continue;
                   }
@@ -228,7 +254,7 @@ export default function Upload() {
 
               const userEmail = localStorage.getItem("userEmail") || "unknown";
               
-              // Get the store code from the first record (all records have same store code per sheet)
+              // Get the store code from the first record
               const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
 
               const response = await fetch("/api/upload", {
