@@ -1,29 +1,19 @@
-import React, { useState } from "react";
+import { useState, useEffect } from "react";
 import styles from "../styles/Discrepancies.module.css";
 
 export default function Approvals() {
-  const [discrepancies, setDiscrepancies] = useState<any[]>([]);
+  const [discrepancies, setDiscrepancies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("pending");
 
-  React.useEffect(() => {
+  useEffect(() => {
     // TODO: Fetch discrepancies from API
     setLoading(false);
   }, []);
 
-  const handleApprove = (id: string) => {
-    console.log("Approved:", id);
-    // TODO: Call approval API
-  };
-
-  const handleReject = (id: string) => {
-    console.log("Rejected:", id);
-    // TODO: Call rejection API
-  };
-
   return (
     <div className={styles.container}>
-      <h1>Approvals & Discrepancies</h1>
+      <h1>✅ Approvals & Discrepancies</h1>
 
       <div className={styles.filterBar}>
         <select
@@ -53,7 +43,6 @@ export default function Approvals() {
                 <th>Old Value</th>
                 <th>New Value</th>
                 <th>Status</th>
-                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -65,24 +54,6 @@ export default function Approvals() {
                   <td>{item.oldValue}</td>
                   <td>{item.newValue}</td>
                   <td>{item.status}</td>
-                  <td>
-                    {item.status === "pending" && (
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          onClick={() => handleApprove(item.id)}
-                          className={styles.approveBtn}
-                        >
-                          ✓ Approve
-                        </button>
-                        <button
-                          onClick={() => handleReject(item.id)}
-                          className={styles.rejectBtn}
-                        >
-                          ✗ Reject
-                        </button>
-                      </div>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
