@@ -1,7 +1,4 @@
-// api/upload.js (Vercel Function)
 import { createClient } from "@supabase/supabase-js";
-import { v4 as uuidv4 } from "uuid";
-import busboy from "busboy";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -14,31 +11,21 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { email, storeCode } = req.body;
+    const { records, storeCode, userEmail } = req.body;
 
-    if (!email || !storeCode) {
-      return res.status(400).json({ error: "Missing email or storeCode" });
+    if (!records || !storeCode || !userEmail) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Verify user exists
-    const { data: user, error: userError } = await supabase
-      .from("auth_users")
-      .select("*")
-      .eq("email", email)
-      .single();
-
-    if (userError || !user) {
-      return res.status(401).json({ error: "User not found" });
-    }
-
-    // Create upload log entry
+    // Create upload log
     const { data: uploadLog, error: logError } = await supabase
       .from("sales_uploads_log")
       .insert({
         store_code: storeCode,
-        uploaded_by: email,
+        uploaded_by: userEmail,
         file_name: `${storeCode}_${new Date().toISOString()}.xlsx`,
         status: "Processing",
+        total_records: records.length,
       })
       .select()
       .single();
@@ -47,34 +34,30 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to create upload log" });
     }
 
-    // Get existing records for duplicate detection
-    const { data: existingRecords } = await supabase
-      .from("sales_master")
-      .select(
-        "transaction_date, system_invoice_number, model_number, serial_number, quantity, mrp, net_value, discount_value, discount_percentage, sold_by, family, calibre, customer_name, mobile_number"
-      )
-      .eq("store_code", storeCode);
+    // Call Edge Function to insert data
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/process-sales-upload`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({
+          records,
+          storeCode,
+          uploadId: uploadLog.id,
+        }),
+      }
+    );
 
-    // Create duplicate key map
-    const existingDataMap = (existingRecords || []).map((r) => [
-      [
-        storeCode,
-        r.transaction_date,
-        r.system_invoice_number,
-        r.model_number,
-        r.serial_number,
-      ].join("|"),
-      r,
-    ]);
+    const edgeFunctionResult = await response.json();
 
-    res.status(200).json({
-      uploadId: uploadLog.id,
-      storeCode,
-      existingDataMap,
-      message: "Upload initiated. Ready for file processing.",
-    });
-  } catch (error) {
-    console.error("Upload error:", error);
-    res.status(500).json({ error: error.message });
-  }
-}
+    if (!response.ok) {
+      return res
+        .status(500)
+        .json({ error: edgeFunctionResult.error || "Edge function failed" });
+    }
+
+    // Update upload log status
+    await
