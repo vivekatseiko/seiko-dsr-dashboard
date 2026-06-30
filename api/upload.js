@@ -6,19 +6,27 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
+  console.log("🔵 [1] API Upload called");
+
   if (req.method !== "POST") {
+    console.log("❌ [2] Method not POST:", req.method);
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
     const { records, storeCode, userEmail } = req.body;
+    console.log("🔵 [3] Received data:", { recordsCount: records?.length, storeCode, userEmail });
 
     if (!records || !storeCode || !userEmail) {
+      console.log("❌ [4] Missing required fields");
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     const uploadTimestamp = new Date().toISOString();
+    console.log("🔵 [5] Upload timestamp:", uploadTimestamp);
 
+    console.log("🔵 [6] Creating upload log entry...");
+    
     // Create upload log entry
     const { data: uploadLog, error: logError } = await supabase
       .from("sales_uploads_log")
@@ -38,13 +46,18 @@ export default async function handler(req, res) {
       .single();
 
     if (logError) {
-      console.error("Upload log error:", logError);
-      return res.status(500).json({ error: "Failed to create upload log" });
+      console.error("❌ [7] Upload log creation failed:", logError);
+      console.error("Error message:", logError.message);
+      console.error("Error details:", JSON.stringify(logError));
+      return res.status(500).json({ error: `Failed to create upload log: ${logError.message}` });
     }
 
+    console.log("✅ [8] Upload log created with ID:", uploadLog.id);
+
     try {
-      // Insert records into sales_master
-      const { error: insertError } = await supabase
+      console.log("🔵 [9] Inserting records into sales_master...");
+      
+      const { error: insertError, data: insertData } = await supabase
         .from("sales_master")
         .insert(
           records.map((r) => ({
@@ -67,17 +80,29 @@ export default async function handler(req, res) {
         );
 
       if (insertError) {
+        console.error("❌ [10] Insert error:", insertError);
+        console.error("Error message:", insertError.message);
         throw insertError;
       }
 
-      // Update upload log to Completed
-      await supabase
+      console.log("✅ [11] Records inserted successfully. Count:", records.length);
+
+      console.log("🔵 [12] Updating upload log to Completed...");
+      
+      const { error: updateError } = await supabase
         .from("sales_uploads_log")
         .update({ 
           status: "Completed",
           new_entries_count: records.length,
         })
         .eq("id", uploadLog.id);
+
+      if (updateError) {
+        console.error("❌ [13] Update log error:", updateError);
+        throw updateError;
+      }
+
+      console.log("✅ [14] Upload log updated to Completed");
 
       return res.status(200).json({
         success: true,
@@ -86,10 +111,12 @@ export default async function handler(req, res) {
         storeCode,
       });
     } catch (err) {
-      console.error("Insert error:", err);
+      console.error("❌ [15] Insert/Update error:", err);
+      console.error("Error message:", err.message);
 
-      // Update upload log with error
-      await supabase
+      console.log("🔵 [16] Updating upload log with error status...");
+      
+      const { error: updateErr } = await supabase
         .from("sales_uploads_log")
         .update({ 
           status: "Failed",
@@ -97,10 +124,17 @@ export default async function handler(req, res) {
         })
         .eq("id", uploadLog.id);
 
+      if (updateErr) {
+        console.error("❌ [17] Failed to update error log:", updateErr);
+      } else {
+        console.log("✅ [18] Error log updated");
+      }
+
       return res.status(500).json({ error: err.message });
     }
   } catch (error) {
-    console.error("Upload error:", error);
+    console.error("❌ [19] Main error:", error);
+    console.error("Error message:", error.message);
     return res.status(500).json({ error: error.message });
   }
 }
