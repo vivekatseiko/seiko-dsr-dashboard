@@ -23,8 +23,8 @@ export default async function handler(req, res) {
     const finalEndDate = endDate || today.toISOString().split("T")[0];
 
     // Calculate period length in days
-    const startDateObj = new Date(finalStartDate);
-    const endDateObj = new Date(finalEndDate);
+    const startDateObj = new Date(finalStartDate + "T00:00:00");
+    const endDateObj = new Date(finalEndDate + "T00:00:00");
     const periodLengthMs = endDateObj - startDateObj;
     const periodLengthDays = Math.ceil(periodLengthMs / (1000 * 60 * 60 * 24)) + 1;
 
@@ -92,7 +92,7 @@ export default async function handler(req, res) {
         let histWeekendCount = 0;
 
         for (const record of historicalData) {
-          const date = new Date(record.transaction_date);
+          const date = new Date(record.transaction_date + "T00:00:00");
           const dayOfWeek = date.getDay();
           const netValue = parseFloat(record.net_value || 0);
 
@@ -114,13 +114,30 @@ export default async function handler(req, res) {
 
     if (!currentData || currentData.length === 0) {
       console.log("⚠️ No data found for current period");
+      
+      // Still generate empty date range
+      const allDatesInRange = [];
+      for (let d = new Date(startDateObj); d <= endDateObj; d.setDate(d.getDate() + 1)) {
+        allDatesInRange.push(d.toISOString().split("T")[0]);
+      }
+
+      const emptyDailyTrend = allDatesInRange.map(date => ({
+        store_code: "UNKNOWN",
+        store_name: "No Data",
+        date: date,
+        sales: 0,
+        quantity: 0,
+        discount: 0,
+        dayOfWeek: new Date(date + "T00:00:00").getDay(),
+      }));
+
       return res.status(200).json({
         totalSales: 0,
         totalQuantity: 0,
         totalDiscounts: 0,
         averageDiscount: 0,
         asp: 0,
-        dailyTrend: [],
+        dailyTrend: emptyDailyTrend,
         storeData: [],
         cities: [],
         regions: [],
@@ -145,7 +162,6 @@ export default async function handler(req, res) {
 
     const dailyDataByStore = {};
     const storeMetrics = {};
-    const allDates = new Set();
 
     for (const record of currentData) {
       const netValue = parseFloat(record.net_value || 0);
@@ -154,8 +170,6 @@ export default async function handler(req, res) {
       const discountPercentage = parseFloat(record.discount_percentage || 0);
       const date = record.transaction_date || "Unknown";
       const code = record.store_code || "Unknown";
-      
-      allDates.add(date);
 
       const storeName = record.store_master?.store_name || code;
       const cityName = record.store_master?.city || "Unknown";
@@ -199,7 +213,7 @@ export default async function handler(req, res) {
           sales: 0,
           quantity: 0,
           discount: 0,
-          dayOfWeek: new Date(date).getDay(),
+          dayOfWeek: new Date(date + "T00:00:00").getDay(),
         };
       }
       dailyDataByStore[key].sales += netValue;
@@ -207,12 +221,19 @@ export default async function handler(req, res) {
       dailyDataByStore[key].discount += discountValue;
     }
 
+    // Generate all dates in range
+    const allDatesInRange = [];
+    for (let d = new Date(startDateObj); d <= endDateObj; d.setDate(d.getDate() + 1)) {
+      allDatesInRange.push(d.toISOString().split("T")[0]);
+    }
+
+    console.log(`📅 Generated ${allDatesInRange.length} dates in range`);
+
     // Fill missing dates with 0 for each store
-    const sortedDates = Array.from(allDates).sort();
     const storesInData = new Set(currentData.map((r) => r.store_code));
 
     for (const store of storesInData) {
-      for (const date of sortedDates) {
+      for (const date of allDatesInRange) {
         const key = `${store}|${date}`;
         if (!dailyDataByStore[key]) {
           const storeName = storeMetrics[store]?.store_name || store;
@@ -223,8 +244,9 @@ export default async function handler(req, res) {
             sales: 0,
             quantity: 0,
             discount: 0,
-            dayOfWeek: new Date(date).getDay(),
+            dayOfWeek: new Date(date + "T00:00:00").getDay(),
           };
+          console.log(`🔵 Added zero entry: ${store} on ${date}`);
         }
       }
     }
@@ -244,7 +266,7 @@ export default async function handler(req, res) {
       (a, b) => `${a.store_code}${a.date}`.localeCompare(`${b.store_code}${b.date}`)
     );
 
-    console.log(`✅ Calculated - Sales: ${totalSales}, Qty: ${totalQuantity}, Historical Avg: ${historicalWeekdayAvg ? 'Yes' : 'No'}`);
+    console.log(`✅ Final: ${dailyTrend.length} daily records, ${Object.keys(storeMetrics).length} stores`);
 
     return res.status(200).json({
       totalSales: Math.round(totalSales),
