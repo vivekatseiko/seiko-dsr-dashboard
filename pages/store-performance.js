@@ -71,7 +71,7 @@ export default function StorePerformance() {
 
   return (
     <div className={styles.container}>
-      <h1>🏪 Store Performance Analysis</h1>
+      <h1>Store Performance Analysis</h1>
 
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
@@ -141,5 +141,3 @@ export default function StorePerformance() {
     </div>
   );
 }
-
-
