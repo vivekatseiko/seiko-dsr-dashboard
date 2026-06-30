@@ -17,23 +17,33 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    const uploadTimestamp = new Date().toISOString();
+
+    // Create upload log entry
     const { data: uploadLog, error: logError } = await supabase
       .from("sales_uploads_log")
       .insert({
         store_code: storeCode,
         uploaded_by: userEmail,
-        file_name: `${storeCode}_${new Date().toISOString()}.xlsx`,
+        upload_timestamp: uploadTimestamp,
+        file_name: `${storeCode}_${uploadTimestamp}.xlsx`,
         status: "Processing",
         total_rows_in_file: records.length,
+        new_entries_count: 0,
+        duplicate_entries_count: 0,
+        discrepancy_entries_count: 0,
+        error_message: null,
       })
       .select()
       .single();
 
     if (logError) {
+      console.error("Upload log error:", logError);
       return res.status(500).json({ error: "Failed to create upload log" });
     }
 
     try {
+      // Insert records into sales_master
       const { error: insertError } = await supabase
         .from("sales_master")
         .insert(
@@ -60,9 +70,13 @@ export default async function handler(req, res) {
         throw insertError;
       }
 
+      // Update upload log to Completed
       await supabase
         .from("sales_uploads_log")
-        .update({ status: "Completed" })
+        .update({ 
+          status: "Completed",
+          new_entries_count: records.length,
+        })
         .eq("id", uploadLog.id);
 
       return res.status(200).json({
@@ -72,11 +86,14 @@ export default async function handler(req, res) {
         storeCode,
       });
     } catch (err) {
+      console.error("Insert error:", err);
+
+      // Update upload log with error
       await supabase
         .from("sales_uploads_log")
         .update({ 
           status: "Failed",
-          error_message: err.message 
+          error_message: err.message,
         })
         .eq("id", uploadLog.id);
 
