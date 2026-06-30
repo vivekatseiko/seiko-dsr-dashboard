@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from "react";
 
+interface DashboardData {
+  totalSales: number;
+  totalQuantity: number;
+  totalDiscounts: number;
+  averageDiscount: number;
+  asp: number;
+  dailyTrend: any[];
+}
+
 export default function Dashboard() {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,4 +47,3 @@ export default function Dashboard() {
     </div>
   );
 }
-// Updated fix
