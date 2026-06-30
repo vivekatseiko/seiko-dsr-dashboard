@@ -56,7 +56,7 @@ export default function Upload() {
                 try {
                   const sheet = workbook.Sheets[sheetName];
                   
-                  // Convert to array format to see structure
+                  // Convert to array format
                   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
                   if (!rows || rows.length === 0) continue;
@@ -73,9 +73,6 @@ export default function Upload() {
 
                   if (headerRowIndex === -1) continue;
 
-                  // Extract header row
-                  const headers = rows[headerRowIndex];
-
                   // Extract data rows (skip header and empty rows)
                   const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[0]);
 
@@ -83,10 +80,12 @@ export default function Upload() {
                   for (const row of dataRows) {
                     const mrp = parseFloat(row[5] || 0);
                     const netValue = parseFloat(row[6] || 0);
-                    const discountValue = parseFloat(row[7] || 0);
                     
-                    // Calculate discount percent from MRP and net value
-                    const discountPercent = mrp > 0 ? ((mrp - netValue) / mrp) * 100 : 0;
+                    // Calculate discount_value = MRP - net_value
+                    const discountValue = mrp - netValue;
+                    
+                    // Calculate discount_percentage = (discount_value / MRP) * 100
+                    const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
 
                     const record = {
                       store_code: storeCode.toString().toUpperCase(),
@@ -97,8 +96,8 @@ export default function Upload() {
                       serial_number: row[4] || "",
                       mrp: mrp,
                       net_value: netValue,
-                      discount_value: discountValue,
-                      discount_percent: parseFloat(discountPercent.toFixed(2)),
+                      discount_value: parseFloat(discountValue.toFixed(2)),
+                      discount_percentage: parseFloat(discountPercentage.toFixed(2)),
                       family: row[10] || "",
                       calibre: row[11] || "",
                     };
