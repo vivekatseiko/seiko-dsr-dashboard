@@ -136,7 +136,6 @@ export default function Dashboard() {
       }
     }
 
-    // Debug: Log data structure
     Object.entries(chartDataByStore).forEach(([store, data]) => {
       console.log(`Store ${store}: ${data.length} records`, {
         weekends: data.filter(d => d.isWeekend).length,
@@ -277,32 +276,62 @@ export default function Dashboard() {
           {Object.entries(chartDataByStore).map(([store, trendData], storeIdx) => {
             console.log(`🎨 Rendering chart for ${store} with ${trendData.length} points`);
             
-            // Create weekend area references
+            // Add half-day virtual data points for weekend boundaries
+            const enhancedData = [];
+            
+            for (let i = 0; i < trendData.length; i++) {
+              enhancedData.push(trendData[i]);
+              
+              // Add half-day marker after each day
+              if (i < trendData.length - 1) {
+                const nextDay = new Date(trendData[i + 1].date + "T00:00:00");
+                const currentDay = new Date(trendData[i].date + "T00:00:00");
+                const halfDayDate = new Date((nextDay.getTime() + currentDay.getTime()) / 2);
+                const halfDayStr = halfDayDate.toISOString().split("T")[0];
+                const dayOfWeekCurr = currentDay.getDay();
+                const dayOfWeekNext = nextDay.getDay();
+                
+                // Check if transitioning to/from weekend
+                const currIsWeekend = dayOfWeekCurr === 0 || dayOfWeekCurr === 6;
+                const nextIsWeekend = dayOfWeekNext === 0 || dayOfWeekNext === 6;
+                
+                enhancedData.push({
+                  date: halfDayStr,
+                  formattedDate: `${formatDate(trendData[i].date)} 12pm`,
+                  sales: 0,
+                  quantity: 0,
+                  discount: 0,
+                  isWeekend: currIsWeekend || nextIsWeekend,
+                  dayOfWeek: dayOfWeekCurr,
+                  isVirtual: true,
+                });
+              }
+            }
+
+            // Find weekend areas using enhanced data
             const weekendAreas = [];
             let inWeekend = false;
             let weekendStart = null;
 
-            for (let i = 0; i < trendData.length; i++) {
-              const curr = trendData[i];
-              if (curr.isWeekend && !inWeekend) {
-                weekendStart = i;
+            for (let i = 0; i < enhancedData.length; i++) {
+              const curr = enhancedData[i];
+              if (!curr.isVirtual && curr.isWeekend && !inWeekend) {
+                // Weekend starts - include previous virtual half-day
+                weekendStart = Math.max(0, i - 1);
                 inWeekend = true;
-              } else if (!curr.isWeekend && inWeekend) {
+              } else if (!curr.isVirtual && !curr.isWeekend && inWeekend) {
+                // Weekend ends - include current virtual half-day
                 weekendAreas.push({
-                  startIndex: weekendStart,
-                  endIndex: i - 1,
-                  startDate: trendData[weekendStart].formattedDate,
-                  endDate: trendData[i - 1].formattedDate,
+                  startDate: enhancedData[weekendStart].formattedDate,
+                  endDate: enhancedData[Math.min(enhancedData.length - 1, i)].formattedDate,
                 });
                 inWeekend = false;
               }
             }
             if (inWeekend) {
               weekendAreas.push({
-                startIndex: weekendStart,
-                endIndex: trendData.length - 1,
-                startDate: trendData[weekendStart].formattedDate,
-                endDate: trendData[trendData.length - 1].formattedDate,
+                startDate: enhancedData[weekendStart].formattedDate,
+                endDate: enhancedData[enhancedData.length - 1].formattedDate,
               });
             }
 
@@ -322,13 +351,14 @@ export default function Dashboard() {
                     padding: "0.5rem",
                     backgroundColor: "#f9f9f9",
                     borderRadius: "4px",
+                    flexWrap: "wrap",
                   }}>
                     {weekendAreas.map((area, idx) => (
                       <span key={idx} style={{
-                        backgroundColor: "#fff3e0",
+                        backgroundColor: "#ffb366",
                         padding: "4px 8px",
                         borderRadius: "3px",
-                        border: "1px solid #ffb74d",
+                        border: "2px solid #ff9800",
                       }}>
                         Weekend: {area.startDate} - {area.endDate}
                       </span>
@@ -339,17 +369,17 @@ export default function Dashboard() {
                 <Recharts.LineChart
                   width={1200}
                   height={400}
-                  data={trendData}
+                  data={enhancedData}
                   margin={{ top: 5, right: 30, left: 0, bottom: 80 }}
                 >
                   {/* Background rectangles for weekends */}
                   {weekendAreas.map((area, idx) => (
                     <Recharts.ReferenceArea
                       key={`weekend-area-${idx}`}
-                      x1={trendData[area.startIndex].formattedDate}
-                      x2={trendData[area.endIndex].formattedDate}
-                      fill="#fff3e0"
-                      fillOpacity={0.4}
+                      x1={area.startDate}
+                      x2={area.endDate}
+                      fill="#ffb366"
+                      fillOpacity={0.7}
                       isFront={false}
                     />
                   ))}
@@ -357,7 +387,7 @@ export default function Dashboard() {
                   <Recharts.CartesianGrid strokeDasharray="3 3" />
                   <Recharts.XAxis
                     dataKey="formattedDate"
-                    interval={Math.max(0, Math.ceil(trendData.length / 12) - 1)}
+                    interval={Math.max(0, Math.ceil(enhancedData.length / 24) - 1)}
                     angle={-45}
                     textAnchor="end"
                     height={80}
@@ -367,6 +397,7 @@ export default function Dashboard() {
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
                         const d = payload[0].payload;
+                        if (d.isVirtual) return null;
                         const dayType = d.isWeekend ? "Weekend 🌅" : "Weekday 📅";
                         return (
                           <div style={{
@@ -396,9 +427,9 @@ export default function Dashboard() {
                     connectNulls={false}
                     dot={(props) => {
                       const { cx, cy, payload } = props;
-                      if (!payload) return null;
+                      if (!payload || payload.isVirtual) return null;
                       if (payload.isWeekend) {
-                        return <circle cx={cx} cy={cy} r={5} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.7} />;
+                        return <circle cx={cx} cy={cy} r={6} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.9} strokeWidth={2} stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
                       }
                       return <circle cx={cx} cy={cy} r={3} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
                     }}
@@ -426,9 +457,9 @@ export default function Dashboard() {
                 </Recharts.LineChart>
 
                 <div style={{ marginTop: "1rem", fontSize: "12px", display: "flex", flexWrap: "wrap", gap: "2rem" }}>
-                  <span>🔵 Weekday (solid dot)</span>
+                  <span>🔵 Weekday (small dot)</span>
                   <span>🔴 Weekend (larger dot)</span>
-                  <span style={{ backgroundColor: "#fff3e0", padding: "2px 6px", borderRadius: "3px" }}>🟨 Weekend Area</span>
+                  <span style={{ backgroundColor: "#ffb366", opacity: 0.7, padding: "2px 6px", borderRadius: "3px" }}>🟠 Weekend Area (12pm to 12pm)</span>
                 </div>
               </div>
             );
