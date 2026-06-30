@@ -23,7 +23,7 @@ export default function Upload() {
     "SWSPHCIND",
     "SWSNEMCGH",
     "SWSPMCMUM",
-    "SWSPMMMPNE",
+    "SWSPMMPNE",
     "SWSSCMHYD",
     "SWSLULKOC",
     "SWSCAMKOL",
@@ -36,6 +36,39 @@ export default function Upload() {
     if (!code) return false;
     const upperCode = code.toString().toUpperCase();
     return VALID_STORE_CODES.includes(upperCode);
+  };
+
+  const isDateColumn = (columnName) => {
+    if (!columnName) return false;
+    const name = columnName.toString().toLowerCase();
+    return (
+      name.includes("date") ||
+      name.includes("transaction date") ||
+      name.includes("invoice date")
+    );
+  };
+
+  const parseDate = (dateValue) => {
+    if (!dateValue) return "";
+
+    // Handle dd-mm-yyyy format
+    if (typeof dateValue === "string") {
+      const ddmmyyyy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.test(dateValue);
+      if (ddmmyyyy) {
+        const [day, month, year] = dateValue.split("-");
+        const date = new Date(year, month - 1, day);
+        return date.toISOString().split("T")[0];
+      }
+      return dateValue;
+    }
+
+    // Handle Excel serial date
+    if (typeof dateValue === "number") {
+      const date = new Date((dateValue - 25569) * 86400 * 1000);
+      return date.toISOString().split("T")[0];
+    }
+
+    return "";
   };
 
   const handleFileUpload = async (e) => {
@@ -76,6 +109,7 @@ export default function Upload() {
                 try {
                   const sheet = workbook.Sheets[sheetName];
                   
+                  // Check store code in B3
                   const storeCodeCell = sheet["B3"];
                   const sheetStoreCode = storeCodeCell?.v;
 
@@ -99,13 +133,24 @@ export default function Upload() {
                     continue;
                   }
 
+                  // Find header row - look up to row 30 for flexibility
                   let headerRowIndex = -1;
-                  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+                  let dateColumnIndex = -1;
+
+                  for (let i = 0; i < Math.min(rows.length, 30); i++) {
                     const row = rows[i];
-                    if (row.some((cell) => cell && cell.toString().toLowerCase().includes("date"))) {
-                      headerRowIndex = i;
-                      break;
+                    if (!row || row.length === 0) continue;
+
+                    // Check if this row contains a date column
+                    for (let j = 0; j < row.length; j++) {
+                      if (isDateColumn(row[j])) {
+                        headerRowIndex = i;
+                        dateColumnIndex = j;
+                        break;
+                      }
                     }
+
+                    if (headerRowIndex !== -1) break;
                   }
 
                   if (headerRowIndex === -1) {
@@ -117,15 +162,16 @@ export default function Upload() {
                   const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[0]);
 
                   if (dataRows.length === 0) {
-                    console.log(`Skipping sheet "${sheetName}" - no data rows`);
+                    console.log(`Skipping sheet "${sheetName}" - no data rows after headers`);
                     skippedSheets++;
                     continue;
                   }
 
-                  const firstDataValue = dataRows[0][0];
-                  const isValidDate = !isNaN(Date.parse(firstDataValue));
-                  
-                  if (!isValidDate) {
+                  // Validate first data row has valid date
+                  const firstDataValue = dataRows[0][dateColumnIndex];
+                  const parsedDate = parseDate(firstDataValue);
+
+                  if (!parsedDate) {
                     console.log(`Skipping sheet "${sheetName}" - invalid date format: ${firstDataValue}`);
                     skippedSheets++;
                     continue;
@@ -135,6 +181,10 @@ export default function Upload() {
                   console.log(`Processing sheet "${sheetName}" (store: ${sheetStoreCode}) with ${dataRows.length} rows`);
 
                   for (const row of dataRows) {
+                    const transactionDate = parseDate(row[dateColumnIndex]);
+
+                    if (!transactionDate) continue;
+
                     const mrp = parseFloat(row[5] || 0);
                     const netValue = parseFloat(row[6] || 0);
                     
@@ -143,7 +193,7 @@ export default function Upload() {
 
                     const record = {
                       store_code: sheetStoreCode.toString().toUpperCase(),
-                      transaction_date: row[0] || "",
+                      transaction_date: transactionDate,
                       system_invoice_number: row[1] || "",
                       model_number: row[2] || "",
                       quantity: parseInt(row[3] || 0),
@@ -159,9 +209,7 @@ export default function Upload() {
                       mobile_number: row[17] || "",
                     };
 
-                    if (record.transaction_date) {
-                      allRecords.push(record);
-                    }
+                    allRecords.push(record);
                   }
                 } catch (err) {
                   console.error(`Error processing sheet ${sheetName}:`, err);
