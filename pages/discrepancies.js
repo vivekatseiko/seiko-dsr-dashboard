@@ -1,247 +1,126 @@
-// pages/discrepancies.tsx (React/Next.js)
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import styles from "../styles/Discrepancies.module.css";
 
-interface Discrepancy {
-  id: number;
-  store_code: string;
-  transaction_date: string;
-  system_invoice_number: string;
-  model_number: string;
-  serial_number: string;
-  field_changed: string;
-  old_value: any;
-  new_value: any;
-  status: string;
-}
-
 export default function Discrepancies() {
   const router = useRouter();
-  const { uploadId } = router.query;
-  const [discrepancies, setDiscrepancies] = useState<Discrepancy[]>([]);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [discrepancies, setDiscrepancies] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [processing, setProcessing] = useState(false);
+  const [filter, setFilter] = useState("pending");
 
   useEffect(() => {
-    if (!uploadId) return;
-
-    const fetchDiscrepancies = async () => {
+    const fetchData = async () => {
       try {
-        const response = await fetch(`/api/discrepancies?uploadId=${uploadId}`);
+        const response = await fetch(`/api/discrepancies?status=${filter}`);
         const data = await response.json();
-
-        if (response.ok) {
-          setDiscrepancies(data.discrepancies || []);
-        } else {
-          setError(data.error || "Failed to load discrepancies");
-        }
+        setDiscrepancies(data || []);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "An error occurred");
+        console.error("Error:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchDiscrepancies();
-  }, [uploadId]);
+    fetchData();
+  }, [filter]);
 
-  const toggleSelect = (id: number) => {
-    const newSelected = new Set(selected);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelected(newSelected);
-  };
-
-  const toggleSelectAll = () => {
-    if (selected.size === discrepancies.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(discrepancies.map((d) => d.id)));
-    }
-  };
-
-  const handleApprove = async () => {
-    if (selected.size === 0) {
-      setError("Select discrepancies to approve");
-      return;
-    }
-
-    setProcessing(true);
+  const handleApprove = async (id) => {
     try {
-      const userEmail = localStorage.getItem("userEmail");
-      const response = await fetch("/api/discrepancies", {
-        method: "POST",
+      const response = await fetch(`/api/discrepancies/${id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "approve",
-          discrepancyIds: Array.from(selected),
-          email: userEmail,
-        }),
+        body: JSON.stringify({ status: "approved" }),
       });
 
-      const data = await response.json();
-
       if (response.ok) {
-        // Refresh discrepancies
-        setDiscrepancies(
-          discrepancies.filter((d) => !selected.has(d.id))
-        );
-        setSelected(new Set());
-
-        if (discrepancies.length === selected.size) {
-          // All discrepancies approved, go back
-          setTimeout(() => router.push("/upload"), 1500);
-        }
-      } else {
-        setError(data.error || "Approval failed");
+        setDiscrepancies(discrepancies.filter((d) => d.id !== id));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
-    } finally {
-      setProcessing(false);
+      console.error("Error:", err);
     }
   };
 
-  const handleReject = async () => {
-    if (selected.size === 0) {
-      setError("Select discrepancies to reject");
-      return;
-    }
-
-    setProcessing(true);
+  const handleReject = async (id) => {
     try {
-      const userEmail = localStorage.getItem("userEmail");
-      const response = await fetch("/api/discrepancies", {
-        method: "POST",
+      const response = await fetch(`/api/discrepancies/${id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "reject",
-          discrepancyIds: Array.from(selected),
-          email: userEmail,
-        }),
+        body: JSON.stringify({ status: "rejected" }),
       });
 
-      const data = await response.json();
-
       if (response.ok) {
-        setDiscrepancies(
-          discrepancies.filter((d) => !selected.has(d.id))
-        );
-        setSelected(new Set());
-      } else {
-        setError(data.error || "Rejection failed");
+        setDiscrepancies(discrepancies.filter((d) => d.id !== id));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
-    } finally {
-      setProcessing(false);
+      console.error("Error:", err);
     }
   };
-
-  if (loading) {
-    return (
-      <div className={styles.container}>
-        <p>Loading discrepancies...</p>
-      </div>
-    );
-  }
-
-  if (discrepancies.length === 0) {
-    return (
-      <div className={styles.container}>
-        <h1>No Discrepancies</h1>
-        <p>All uploaded data matches the existing records.</p>
-        <button
-          onClick={() => router.push("/upload")}
-          className={styles.backButton}
-        >
-          Back to Upload
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <h1>Review Discrepancies</h1>
-        <p>Found {discrepancies.length} discrepancies that need approval</p>
+      <h1>Discrepancies</h1>
+
+      <div className={styles.filterBar}>
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className={styles.select}
+        >
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
       </div>
 
-      {error && <div className={styles.error}>{error}</div>}
-
-      <div className={styles.actions}>
-        <label className={styles.selectAllLabel}>
-          <input
-            type="checkbox"
-            checked={selected.size === discrepancies.length}
-            onChange={toggleSelectAll}
-          />
-          Select All ({selected.size}/{discrepancies.length})
-        </label>
-
-        <div className={styles.buttons}>
-          <button
-            onClick={handleApprove}
-            disabled={selected.size === 0 || processing}
-            className={styles.approveButton}
-          >
-            {processing ? "Processing..." : "Approve Selected"}
-          </button>
-          <button
-            onClick={handleReject}
-            disabled={selected.size === 0 || processing}
-            className={styles.rejectButton}
-          >
-            {processing ? "Processing..." : "Reject Selected"}
-          </button>
-        </div>
-      </div>
-
-      <div className={styles.table}>
-        <table>
-          <thead>
-            <tr>
-              <th>Select</th>
-              <th>Invoice #</th>
-              <th>Model</th>
-              <th>Serial</th>
-              <th>Field Changed</th>
-              <th>Old Value</th>
-              <th>New Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {discrepancies.map((disc) => (
-              <tr key={disc.id} className={selected.has(disc.id) ? styles.selected : ""}>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(disc.id)}
-                    onChange={() => toggleSelect(disc.id)}
-                  />
-                </td>
-                <td>{disc.system_invoice_number}</td>
-                <td>{disc.model_number}</td>
-                <td>{disc.serial_number}</td>
-                <td className={styles.fieldName}>{disc.field_changed}</td>
-                <td className={styles.oldValue}>
-                  {String(disc.old_value).substring(0, 50)}
-                </td>
-                <td className={styles.newValue}>
-                  {String(disc.new_value).substring(0, 50)}
-                </td>
+      {loading ? (
+        <p>Loading...</p>
+      ) : discrepancies.length === 0 ? (
+        <p>No discrepancies found</p>
+      ) : (
+        <div className={styles.table}>
+          <table>
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Field</th>
+                <th>Old Value</th>
+                <th>New Value</th>
+                <th>Status</th>
+                <th>Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {discrepancies.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.store_code}</td>
+                  <td>{item.field_name}</td>
+                  <td>{item.old_value}</td>
+                  <td>{item.new_value}</td>
+                  <td>{item.status}</td>
+                  <td>
+                    {item.status === "pending" && (
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          onClick={() => handleApprove(item.id)}
+                          className={styles.approveBtn}
+                        >
+                          ✓ Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(item.id)}
+                          className={styles.rejectBtn}
+                        >
+                          ✗ Reject
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
