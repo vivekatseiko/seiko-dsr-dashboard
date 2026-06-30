@@ -9,16 +9,27 @@ export default function Upload() {
 
   // Master list of valid store codes
   const VALID_STORE_CODES = [
-    "SWSPHPLUK",
-    "SWSPMCMUM",
-    "SWSPMMPNE",
-    "SWSSCMHYD",
+    "SBTEXACHN",
+    "SBTFALBLR",
+    "SBTSCMKOL",
+    "SBTBRVMUM",
+    "SBTDLFNOI",
+    "SBTPMCCHN",
+    "SBTSKYMUM",
+    "SBTBLRMUM",
+    "SBTMKSBLR",
+    "SWSPMCCHN",
     "SWSMOABLR",
-    "SWSPPLBNC",
-    "SWSCMCCHN",
-    "SWSKPLKOL",
-    "SWSDLNDHD",
-    "SWSGUPLGU",
+    "SWSPHCIND",
+    "SWSNEMCGH",
+    "SWSPMCMUM",
+    "SWSPMMMPNE",
+    "SWSSCMHYD",
+    "SWSLULKOC",
+    "SWSCAMKOL",
+    "SWSUNMDEL",
+    "SWSPHPLUK",
+    "SBTPMCPNE",
   ];
 
   const isValidStoreCode = (code) => {
@@ -68,14 +79,12 @@ export default function Upload() {
                   const storeCodeCell = sheet["B3"];
                   const sheetStoreCode = storeCodeCell?.v;
 
-                  // Validate store code exists
                   if (!sheetStoreCode) {
                     console.log(`Skipping sheet "${sheetName}" - store code missing in B3`);
                     skippedSheets++;
                     continue;
                   }
 
-                  // Validate store code matches master list
                   if (!isValidStoreCode(sheetStoreCode)) {
                     console.log(`Skipping sheet "${sheetName}" - store code "${sheetStoreCode}" not in master list`);
                     skippedSheets++;
@@ -90,7 +99,6 @@ export default function Upload() {
                     continue;
                   }
 
-                  // Find header row with "Date" column
                   let headerRowIndex = -1;
                   for (let i = 0; i < Math.min(rows.length, 15); i++) {
                     const row = rows[i];
@@ -114,7 +122,6 @@ export default function Upload() {
                     continue;
                   }
 
-                  // Validate first row has valid date format
                   const firstDataValue = dataRows[0][0];
                   const isValidDate = !isNaN(Date.parse(firstDataValue));
                   
