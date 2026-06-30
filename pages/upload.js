@@ -35,7 +35,6 @@ export default function Upload() {
               const XLSX = window.XLSX;
               const workbook = XLSX.read(event.target.result, { type: "array" });
 
-              // Get store code from B3 of first sheet
               const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
               const storeCodeCell = firstSheet["B3"];
               const storeCode = storeCodeCell?.v;
@@ -51,17 +50,13 @@ export default function Upload() {
 
               let allRecords = [];
 
-              // Process each sheet
               for (const sheetName of workbook.SheetNames) {
                 try {
                   const sheet = workbook.Sheets[sheetName];
-                  
-                  // Convert to array format
                   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
                   if (!rows || rows.length === 0) continue;
 
-                  // Find the header row (look for "Date" column)
                   let headerRowIndex = -1;
                   for (let i = 0; i < Math.min(rows.length, 10); i++) {
                     const row = rows[i];
@@ -73,18 +68,13 @@ export default function Upload() {
 
                   if (headerRowIndex === -1) continue;
 
-                  // Extract data rows (skip header and empty rows)
                   const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[0]);
 
-                  // Map data to records
                   for (const row of dataRows) {
                     const mrp = parseFloat(row[5] || 0);
                     const netValue = parseFloat(row[6] || 0);
                     
-                    // Calculate discount_value = MRP - net_value
                     const discountValue = mrp - netValue;
-                    
-                    // Calculate discount_percentage = (discount_value / MRP) * 100
                     const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
 
                     const record = {
