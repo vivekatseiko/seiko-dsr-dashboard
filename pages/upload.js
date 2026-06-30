@@ -81,6 +81,13 @@ export default function Upload() {
 
                   // Map data to records
                   for (const row of dataRows) {
+                    const mrp = parseFloat(row[5] || 0);
+                    const netValue = parseFloat(row[6] || 0);
+                    const discountValue = parseFloat(row[7] || 0);
+                    
+                    // Calculate discount percent from MRP and net value
+                    const discountPercent = mrp > 0 ? ((mrp - netValue) / mrp) * 100 : 0;
+
                     const record = {
                       store_code: storeCode.toString().toUpperCase(),
                       transaction_date: row[0] || "",
@@ -88,10 +95,10 @@ export default function Upload() {
                       model_number: row[2] || "",
                       qty: parseInt(row[3] || 0),
                       serial_number: row[4] || "",
-                      mrp: parseFloat(row[5] || 0),
-                      net_value: parseFloat(row[6] || 0),
-                      discount_value: parseFloat(row[7] || 0),
-                      discount_percent: parseFloat(row[8] || 0),
+                      mrp: mrp,
+                      net_value: netValue,
+                      discount_value: discountValue,
+                      discount_percent: parseFloat(discountPercent.toFixed(2)),
                       family: row[10] || "",
                       calibre: row[11] || "",
                     };
