@@ -131,3 +131,48 @@ export default function Upload() {
   return (
     <div className={styles.container}>
       <h1>📤 Upload Sales Data</h1>
+
+      <div className={styles.uploadBox}>
+        <p>Select an Excel file to upload</p>
+        <p style={{ fontSize: "12px", color: "#666" }}>
+          (Store code auto-detected from file)
+        </p>
+
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={handleFileUpload}
+          disabled={loading}
+          style={{ marginTop: "1rem" }}
+        />
+
+        {fileName && (
+          <p style={{ marginTop: "1rem", fontSize: "14px", color: "#666" }}>
+            Selected: {fileName}
+          </p>
+        )}
+
+        {loading && <p style={{ marginTop: "1rem" }}>Processing...</p>}
+
+        {message && (
+          <div
+            style={{
+              marginTop: "1rem",
+              padding: "1rem",
+              borderRadius: "4px",
+              backgroundColor:
+                messageType === "success" ? "#f0fdf4" : "#fef2f2",
+              color: messageType === "success" ? "#16a34a" : "#e24b4a",
+              border:
+                messageType === "success"
+                  ? "1px solid #16a34a"
+                  : "1px solid #e24b4a",
+            }}
+          >
+            {message}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
