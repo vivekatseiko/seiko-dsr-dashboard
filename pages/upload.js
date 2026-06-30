@@ -82,14 +82,17 @@ export default function Upload() {
                       transaction_date: row[0] || "",
                       system_invoice_number: row[1] || "",
                       model_number: row[2] || "",
-                      qty: parseInt(row[3] || 0),
+                      quantity: parseInt(row[3] || 0),
                       serial_number: row[4] || "",
                       mrp: mrp,
                       net_value: netValue,
                       discount_value: parseFloat(discountValue.toFixed(2)),
                       discount_percentage: parseFloat(discountPercentage.toFixed(2)),
+                      sold_by: row[9] || "",
                       family: row[10] || "",
                       calibre: row[11] || "",
+                      customer_name: row[16] || "",
+                      mobile_number: row[17] || "",
                     };
 
                     if (record.transaction_date) {
