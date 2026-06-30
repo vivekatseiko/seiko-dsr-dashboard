@@ -17,7 +17,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Create upload log
     const { data: uploadLog, error: logError } = await supabase
       .from("sales_uploads_log")
       .insert({
@@ -34,13 +33,12 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to create upload log" });
     }
 
-    // Insert directly instead of calling Edge Function
     try {
       const { error: insertError } = await supabase
         .from("sales_master")
         .insert(
           records.map((r) => ({
-            store_code: storeCode,
+            store_code: r.store_code,
             transaction_date: r.transaction_date,
             system_invoice_number: r.system_invoice_number,
             model_number: r.model_number,
@@ -49,7 +47,7 @@ export default async function handler(req, res) {
             mrp: r.mrp,
             net_value: r.net_value,
             discount_value: r.discount_value,
-            discount_percent: r.discount_percent,
+            discount_percentage: r.discount_percentage,
             family: r.family,
             calibre: r.calibre,
           }))
@@ -59,7 +57,6 @@ export default async function handler(req, res) {
         throw insertError;
       }
 
-      // Update status
       await supabase
         .from("sales_uploads_log")
         .update({ status: "Completed" })
@@ -72,7 +69,6 @@ export default async function handler(req, res) {
         storeCode,
       });
     } catch (err) {
-      // If insert fails, update log with error
       await supabase
         .from("sales_uploads_log")
         .update({ 
