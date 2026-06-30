@@ -37,3 +37,42 @@ export default async function handler(req, res) {
     // Call Edge Function
     const response = await fetch(
       `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/process-sales-upload`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({
+          records,
+          storeCode,
+          uploadId: uploadLog.id,
+        }),
+      }
+    );
+
+    const edgeFunctionResult = await response.json();
+
+    if (!response.ok) {
+      return res
+        .status(500)
+        .json({ error: edgeFunctionResult.error || "Edge function failed" });
+    }
+
+    // Update upload log
+    await supabase
+      .from("sales_uploads_log")
+      .update({ status: "Completed" })
+      .eq("id", uploadLog.id);
+
+    return res.status(200).json({
+      success: true,
+      uploadId: uploadLog.id,
+      recordsInserted: records.length,
+      storeCode,
+    });
+  } catch (error) {
+    console.error("Upload error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+}
