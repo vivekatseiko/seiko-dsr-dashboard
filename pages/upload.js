@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
-import styles from "../styles/Upload.module.css";
 
 export default function Upload() {
   const router = useRouter();
@@ -24,23 +23,21 @@ export default function Upload() {
 
           const script = document.createElement("script");
           script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
+          
           script.onerror = () => {
             setMessage("❌ Failed to load Excel library.");
             setMessageType("error");
             setLoading(false);
-            return;
           };
 
           script.onload = async () => {
             try {
-              setMessage("Parsing Excel file...");
-
               const XLSX = window.XLSX;
               const workbook = XLSX.read(event.target.result, { type: "array" });
-              const worksheet = workbook.Sheets[workbook.SheetNames[0]];
 
-              // Get store code from B3
-              const storeCodeCell = worksheet["B3"];
+              // Get store code from B3 of first sheet
+              const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+              const storeCodeCell = firstSheet["B3"];
               const storeCode = storeCodeCell?.v;
 
               if (!storeCode) {
@@ -50,53 +47,80 @@ export default function Upload() {
                 return;
               }
 
-              setMessage("Reading data table...");
+              setMessage(`Found store: ${storeCode}. Reading ${workbook.SheetNames.length} sheets...`);
 
-              // Read the actual data table (starting from row with headers)
-              const jsonData = XLSX.utils.sheet_to_json(worksheet);
+              let allRecords = [];
 
-              if (!jsonData || jsonData.length === 0) {
-                setMessage("❌ No data found in Excel file");
+              // Process each sheet
+              for (const sheetName of workbook.SheetNames) {
+                try {
+                  const sheet = workbook.Sheets[sheetName];
+                  
+                  // Convert to array format to see structure
+                  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+                  if (!rows || rows.length === 0) continue;
+
+                  // Find the header row (look for "Date" column)
+                  let headerRowIndex = -1;
+                  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+                    const row = rows[i];
+                    if (row.some((cell) => cell && cell.toString().includes("Date"))) {
+                      headerRowIndex = i;
+                      break;
+                    }
+                  }
+
+                  if (headerRowIndex === -1) continue;
+
+                  // Extract header row
+                  const headers = rows[headerRowIndex];
+
+                  // Extract data rows (skip header and empty rows)
+                  const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[0]);
+
+                  // Map data to records
+                  for (const row of dataRows) {
+                    const record = {
+                      store_code: storeCode.toString().toUpperCase(),
+                      transaction_date: row[0] || "",
+                      system_invoice_number: row[1] || "",
+                      model_number: row[2] || "",
+                      qty: parseInt(row[3] || 0),
+                      serial_number: row[4] || "",
+                      mrp: parseFloat(row[5] || 0),
+                      net_value: parseFloat(row[6] || 0),
+                      discount_value: parseFloat(row[7] || 0),
+                      discount_percent: parseFloat(row[8] || 0),
+                      family: row[10] || "",
+                      calibre: row[11] || "",
+                    };
+
+                    if (record.transaction_date) {
+                      allRecords.push(record);
+                    }
+                  }
+                } catch (err) {
+                  console.error(`Error processing sheet ${sheetName}:`, err);
+                }
+              }
+
+              if (allRecords.length === 0) {
+                setMessage("❌ No valid records found in any sheet");
                 setMessageType("error");
                 setLoading(false);
                 return;
               }
 
-              setMessage(`Preparing ${jsonData.length} records...`);
-
-              const records = jsonData
-                .filter((row) => row["Date"]) // Skip empty rows
-                .map((row) => ({
-                  store_code: storeCode.toString().toUpperCase(),
-                  transaction_date: row["Date"] || "",
-                  system_invoice_number: row["System Invoice Number"] || "",
-                  model_number: row["Model Number"] || "",
-                  qty: parseInt(row["Qty"] || 0),
-                  serial_number: row["Serial Number"] || "",
-                  mrp: parseFloat(row["MRP"] || 0),
-                  net_value: parseFloat(row["Net Value"] || 0),
-                  discount_value: parseFloat(row["Discount Value"] || 0),
-                  discount_percent: parseFloat(row["Discount %"] || 0),
-                  family: row["Family"] || "",
-                  calibre: row["Calibre"] || "",
-                }));
-
-              if (records.length === 0) {
-                setMessage("❌ No valid records found");
-                setMessageType("error");
-                setLoading(false);
-                return;
-              }
+              setMessage(`Found ${allRecords.length} records. Uploading...`);
 
               const userEmail = localStorage.getItem("userEmail") || "unknown";
-
-              setMessage("Uploading to server...");
 
               const response = await fetch("/api/upload", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  records,
+                  records: allRecords,
                   storeCode: storeCode.toString().toUpperCase(),
                   userEmail,
                 }),
@@ -112,7 +136,7 @@ export default function Upload() {
               }
 
               setMessage(
-                `✅ Success! Uploaded ${result.recordsInserted} records`
+                `✅ Success! Uploaded ${result.recordsInserted} records from ${allRecords.length} total`
               );
               setMessageType("success");
               setTimeout(() => router.push("/dashboard"), 2000);
@@ -145,7 +169,7 @@ export default function Upload() {
   return (
     <div style={{ padding: "2rem", maxWidth: "600px", margin: "0 auto" }}>
       <h1>📤 Upload Sales Data</h1>
-      <p>Select an Excel file (store code from B3)</p>
+      <p>Upload Excel file with multiple month sheets</p>
 
       <div
         style={{
