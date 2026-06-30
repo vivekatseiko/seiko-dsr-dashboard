@@ -7,6 +7,26 @@ export default function Upload() {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
 
+  // Master list of valid store codes
+  const VALID_STORE_CODES = [
+    "SWSPHPLUK",
+    "SWSPMCMUM",
+    "SWSPMMPNE",
+    "SWSSCMHYD",
+    "SWSMOABLR",
+    "SWSPPLBNC",
+    "SWSCMCCHN",
+    "SWSKPLKOL",
+    "SWSDLNDHD",
+    "SWSGUPLGU",
+  ];
+
+  const isValidStoreCode = (code) => {
+    if (!code) return false;
+    const upperCode = code.toString().toUpperCase();
+    return VALID_STORE_CODES.includes(upperCode);
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -35,40 +55,77 @@ export default function Upload() {
               const XLSX = window.XLSX;
               const workbook = XLSX.read(event.target.result, { type: "array" });
 
-              const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-              const storeCodeCell = firstSheet["B3"];
-              const storeCode = storeCodeCell?.v;
-
-              if (!storeCode) {
-                setMessage("❌ Store code not found in cell B3");
-                setMessageType("error");
-                setLoading(false);
-                return;
-              }
-
-              setMessage(`Found store: ${storeCode}. Reading ${workbook.SheetNames.length} sheets...`);
+              setMessage(`Found ${workbook.SheetNames.length} sheets. Processing...`);
 
               let allRecords = [];
+              let processedSheets = 0;
+              let skippedSheets = 0;
 
               for (const sheetName of workbook.SheetNames) {
                 try {
                   const sheet = workbook.Sheets[sheetName];
+                  
+                  const storeCodeCell = sheet["B3"];
+                  const sheetStoreCode = storeCodeCell?.v;
+
+                  // Validate store code exists
+                  if (!sheetStoreCode) {
+                    console.log(`Skipping sheet "${sheetName}" - store code missing in B3`);
+                    skippedSheets++;
+                    continue;
+                  }
+
+                  // Validate store code matches master list
+                  if (!isValidStoreCode(sheetStoreCode)) {
+                    console.log(`Skipping sheet "${sheetName}" - store code "${sheetStoreCode}" not in master list`);
+                    skippedSheets++;
+                    continue;
+                  }
+
                   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
-                  if (!rows || rows.length === 0) continue;
+                  if (!rows || rows.length === 0) {
+                    console.log(`Skipping sheet "${sheetName}" - no rows`);
+                    skippedSheets++;
+                    continue;
+                  }
 
+                  // Find header row with "Date" column
                   let headerRowIndex = -1;
-                  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+                  for (let i = 0; i < Math.min(rows.length, 15); i++) {
                     const row = rows[i];
-                    if (row.some((cell) => cell && cell.toString().includes("Date"))) {
+                    if (row.some((cell) => cell && cell.toString().toLowerCase().includes("date"))) {
                       headerRowIndex = i;
                       break;
                     }
                   }
 
-                  if (headerRowIndex === -1) continue;
+                  if (headerRowIndex === -1) {
+                    console.log(`Skipping sheet "${sheetName}" - no Date column found`);
+                    skippedSheets++;
+                    continue;
+                  }
 
                   const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[0]);
+
+                  if (dataRows.length === 0) {
+                    console.log(`Skipping sheet "${sheetName}" - no data rows`);
+                    skippedSheets++;
+                    continue;
+                  }
+
+                  // Validate first row has valid date format
+                  const firstDataValue = dataRows[0][0];
+                  const isValidDate = !isNaN(Date.parse(firstDataValue));
+                  
+                  if (!isValidDate) {
+                    console.log(`Skipping sheet "${sheetName}" - invalid date format: ${firstDataValue}`);
+                    skippedSheets++;
+                    continue;
+                  }
+
+                  processedSheets++;
+                  console.log(`Processing sheet "${sheetName}" (store: ${sheetStoreCode}) with ${dataRows.length} rows`);
 
                   for (const row of dataRows) {
                     const mrp = parseFloat(row[5] || 0);
@@ -78,7 +135,7 @@ export default function Upload() {
                     const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
 
                     const record = {
-                      store_code: storeCode.toString().toUpperCase(),
+                      store_code: sheetStoreCode.toString().toUpperCase(),
                       transaction_date: row[0] || "",
                       system_invoice_number: row[1] || "",
                       model_number: row[2] || "",
@@ -101,17 +158,18 @@ export default function Upload() {
                   }
                 } catch (err) {
                   console.error(`Error processing sheet ${sheetName}:`, err);
+                  skippedSheets++;
                 }
               }
 
               if (allRecords.length === 0) {
-                setMessage("❌ No valid records found in any sheet");
+                setMessage(`❌ No valid data found. Processed: ${processedSheets} sheets, Skipped: ${skippedSheets} sheets`);
                 setMessageType("error");
                 setLoading(false);
                 return;
               }
 
-              setMessage(`Found ${allRecords.length} records. Uploading...`);
+              setMessage(`Found ${allRecords.length} records from ${processedSheets} sheet(s). Uploading... (Skipped: ${skippedSheets})`);
 
               const userEmail = localStorage.getItem("userEmail") || "unknown";
 
@@ -120,7 +178,7 @@ export default function Upload() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   records: allRecords,
-                  storeCode: storeCode.toString().toUpperCase(),
+                  storeCode: "MULTI",
                   userEmail,
                 }),
               });
@@ -135,7 +193,7 @@ export default function Upload() {
               }
 
               setMessage(
-                `✅ Success! Uploaded ${result.recordsInserted} records from ${allRecords.length} total`
+                `✅ Success! Uploaded ${result.recordsInserted} records from ${processedSheets} sheets (${skippedSheets} skipped)`
               );
               setMessageType("success");
               setTimeout(() => router.push("/dashboard"), 2000);
