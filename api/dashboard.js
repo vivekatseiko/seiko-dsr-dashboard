@@ -10,22 +10,31 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { metric, storeCode = "all", startDate, endDate } = req.query;
-
   try {
-    // Build date filter for MTD (Month to Date)
-    const today = new Date();
-    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const dateFrom = startDate || firstDayOfMonth.toISOString().split("T")[0];
-    const dateTo = endDate || today.toISOString().split("T")[0];
+    const { storeCode = "all" } = req.query;
 
-    // Base query
-    let query = supabase
+    // Simple test query
+    const { data, error } = await supabase
       .from("sales_master")
       .select("*")
-      .gte("transaction_date", dateFrom)
-      .lte("transaction_date", dateTo);
+      .limit(10);
 
-    // Add store filter if specified
-    if (storeCode && storeCode !== "all") {
-      query = query.eq("store_code",
+    if (error) {
+      console.error("Supabase error:", error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.status(200).json({
+      totalSales: 0,
+      totalQuantity: 0,
+      totalDiscounts: 0,
+      averageDiscount: 0,
+      asp: 0,
+      dailyTrend: [],
+      debug: { rowsFound: data?.length || 0 },
+    });
+  } catch (error) {
+    console.error("Dashboard error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+}
