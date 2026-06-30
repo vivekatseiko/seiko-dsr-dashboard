@@ -42,14 +42,17 @@ export default async function handler(req, res) {
             transaction_date: r.transaction_date,
             system_invoice_number: r.system_invoice_number,
             model_number: r.model_number,
-            qty: r.qty,
+            quantity: r.quantity,
             serial_number: r.serial_number,
             mrp: r.mrp,
             net_value: r.net_value,
             discount_value: r.discount_value,
             discount_percentage: r.discount_percentage,
+            sold_by: r.sold_by,
             family: r.family,
             calibre: r.calibre,
+            customer_name: r.customer_name,
+            mobile_number: r.mobile_number,
           }))
         );
 
