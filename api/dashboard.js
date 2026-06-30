@@ -22,16 +22,26 @@ export default async function handler(req, res) {
     const finalStartDate = startDate || firstDayOfMonth.toISOString().split("T")[0];
     const finalEndDate = endDate || today.toISOString().split("T")[0];
 
-    // Calculate last month dates
-    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-    const lastMonthStart = new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1);
-    const lastMonthStartStr = lastMonthStart.toISOString().split("T")[0];
-    const lastMonthEndStr = lastMonthEnd.toISOString().split("T")[0];
+    // Calculate period length in days
+    const startDateObj = new Date(finalStartDate);
+    const endDateObj = new Date(finalEndDate);
+    const periodLengthMs = endDateObj - startDateObj;
+    const periodLengthDays = Math.ceil(periodLengthMs / (1000 * 60 * 60 * 24)) + 1;
 
-    console.log(`Current month: ${finalStartDate} to ${finalEndDate}`);
-    console.log(`Last month: ${lastMonthStartStr} to ${lastMonthEndStr}`);
+    console.log(`Current period: ${finalStartDate} to ${finalEndDate} (${periodLengthDays} days)`);
 
-    // Fetch current month data
+    // Calculate historical period (same length, before start date)
+    const historicalEndDate = new Date(startDateObj);
+    historicalEndDate.setDate(historicalEndDate.getDate() - 1);
+    const historicalStartDate = new Date(historicalEndDate);
+    historicalStartDate.setDate(historicalStartDate.getDate() - periodLengthDays + 1);
+
+    const historicalStartStr = historicalStartDate.toISOString().split("T")[0];
+    const historicalEndStr = historicalEndDate.toISOString().split("T")[0];
+
+    console.log(`Historical period: ${historicalStartStr} to ${historicalEndStr}`);
+
+    // Fetch current period data
     let query = supabase
       .from("sales_master")
       .select("*, store_master(store_name, city, region)")
@@ -49,49 +59,58 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: currentError.message });
     }
 
-    // Fetch last month data for comparison
-    let lastMonthQuery = supabase
+    // Fetch historical data
+    let historicalQuery = supabase
       .from("sales_master")
       .select("transaction_date, net_value, quantity")
-      .gte("transaction_date", lastMonthStartStr)
-      .lte("transaction_date", lastMonthEndStr);
+      .gte("transaction_date", historicalStartStr)
+      .lte("transaction_date", historicalEndStr);
 
     if (storeCode !== "all") {
-      lastMonthQuery = lastMonthQuery.eq("store_code", storeCode.toUpperCase());
+      historicalQuery = historicalQuery.eq("store_code", storeCode.toUpperCase());
     }
 
-    const { data: lastMonthData, error: lastMonthError } = await lastMonthQuery;
+    const { data: historicalData, error: historicalError } = await historicalQuery;
 
-    if (lastMonthError) {
-      console.error("❌ Last month error:", lastMonthError);
-      return res.status(500).json({ error: lastMonthError.message });
+    if (historicalError) {
+      console.error("❌ Historical data error:", historicalError);
+      return res.status(500).json({ error: historicalError.message });
     }
 
-    // Calculate last month weekday/weekend averages
-    let lastMonthWeekdayTotal = 0;
-    let lastMonthWeekdayCount = 0;
-    let lastMonthWeekendTotal = 0;
-    let lastMonthWeekendCount = 0;
+    // Check if historical data is sufficient (at least 80% of period)
+    let historicalWeekdayAvg = null;
+    let historicalWeekendAvg = null;
 
-    if (lastMonthData && lastMonthData.length > 0) {
-      for (const record of lastMonthData) {
-        const date = new Date(record.transaction_date);
-        const dayOfWeek = date.getDay();
-        const netValue = parseFloat(record.net_value || 0);
+    if (historicalData && historicalData.length > 0) {
+      const historicalDatesCount = new Set(historicalData.map(r => r.transaction_date)).size;
+      const minRequiredDates = Math.ceil(periodLengthDays * 0.8);
 
-        // 0 = Sunday, 6 = Saturday
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
-          lastMonthWeekendTotal += netValue;
-          lastMonthWeekendCount++;
-        } else {
-          lastMonthWeekdayTotal += netValue;
-          lastMonthWeekdayCount++;
+      if (historicalDatesCount >= minRequiredDates) {
+        let histWeekdayTotal = 0;
+        let histWeekdayCount = 0;
+        let histWeekendTotal = 0;
+        let histWeekendCount = 0;
+
+        for (const record of historicalData) {
+          const date = new Date(record.transaction_date);
+          const dayOfWeek = date.getDay();
+          const netValue = parseFloat(record.net_value || 0);
+
+          if (dayOfWeek === 0 || dayOfWeek === 6) {
+            histWeekendTotal += netValue;
+            histWeekendCount++;
+          } else {
+            histWeekdayTotal += netValue;
+            histWeekdayCount++;
+          }
         }
+
+        historicalWeekdayAvg = histWeekdayCount > 0 ? histWeekdayTotal / histWeekdayCount : null;
+        historicalWeekendAvg = histWeekendCount > 0 ? histWeekendTotal / histWeekendCount : null;
+      } else {
+        console.log(`⚠️ Insufficient historical data: ${historicalDatesCount}/${minRequiredDates} dates`);
       }
     }
-
-    const lastMonthWeekdayAvg = lastMonthWeekdayCount > 0 ? lastMonthWeekdayTotal / lastMonthWeekdayCount : 0;
-    const lastMonthWeekendAvg = lastMonthWeekendCount > 0 ? lastMonthWeekendTotal / lastMonthWeekendCount : 0;
 
     if (!currentData || currentData.length === 0) {
       console.log("⚠️ No data found for current period");
@@ -106,8 +125,8 @@ export default async function handler(req, res) {
         cities: [],
         regions: [],
         stores: [],
-        lastMonthWeekdayAvg: parseFloat(lastMonthWeekdayAvg.toFixed(2)),
-        lastMonthWeekendAvg: parseFloat(lastMonthWeekendAvg.toFixed(2)),
+        historicalWeekdayAvg: historicalWeekdayAvg ? parseFloat(historicalWeekdayAvg.toFixed(2)) : null,
+        historicalWeekendAvg: historicalWeekendAvg ? parseFloat(historicalWeekendAvg.toFixed(2)) : null,
       });
     }
 
@@ -138,7 +157,6 @@ export default async function handler(req, res) {
       
       allDates.add(date);
 
-      // Extract store info
       const storeName = record.store_master?.store_name || code;
       const cityName = record.store_master?.city || "Unknown";
       const regionName = record.store_master?.region || "Unknown";
@@ -147,13 +165,11 @@ export default async function handler(req, res) {
       regionsSet.add(regionName);
       storesSet.set(code, { code, name: storeName, city: cityName, region: regionName });
 
-      // Overall metrics
       totalSales += netValue;
       totalQuantity += quantity;
       totalDiscounts += discountValue;
       totalDiscountPercentage += discountPercentage;
 
-      // Store-specific metrics
       if (!storeMetrics[code]) {
         storeMetrics[code] = {
           store_code: code,
@@ -174,7 +190,6 @@ export default async function handler(req, res) {
       storeMetrics[code].discount_percent += discountPercentage;
       storeMetrics[code].records++;
 
-      // Daily trend by store
       const key = `${code}|${date}`;
       if (!dailyDataByStore[key]) {
         dailyDataByStore[key] = {
@@ -229,7 +244,7 @@ export default async function handler(req, res) {
       (a, b) => `${a.store_code}${a.date}`.localeCompare(`${b.store_code}${b.date}`)
     );
 
-    console.log(`✅ Calculated - Sales: ${totalSales}, Qty: ${totalQuantity}, Stores: ${Object.keys(storeMetrics).length}`);
+    console.log(`✅ Calculated - Sales: ${totalSales}, Qty: ${totalQuantity}, Historical Avg: ${historicalWeekdayAvg ? 'Yes' : 'No'}`);
 
     return res.status(200).json({
       totalSales: Math.round(totalSales),
@@ -246,8 +261,9 @@ export default async function handler(req, res) {
       cities: Array.from(citiesSet).sort(),
       regions: Array.from(regionsSet).sort(),
       stores: Array.from(storesSet.values()).sort((a, b) => a.name.localeCompare(b.name)),
-      lastMonthWeekdayAvg: parseFloat(lastMonthWeekdayAvg.toFixed(2)),
-      lastMonthWeekendAvg: parseFloat(lastMonthWeekendAvg.toFixed(2)),
+      historicalWeekdayAvg: historicalWeekdayAvg ? parseFloat(historicalWeekdayAvg.toFixed(2)) : null,
+      historicalWeekendAvg: historicalWeekendAvg ? parseFloat(historicalWeekendAvg.toFixed(2)) : null,
+      periodLengthDays: periodLengthDays,
     });
   } catch (error) {
     console.error("❌ Dashboard error:", error);
