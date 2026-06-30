@@ -1,6 +1,47 @@
 import { useState, useEffect } from "react";
 import styles from "../styles/Dashboard.module.css";
 
+// Color palette for different stores (distinct, readable colors)
+const STORE_COLORS = [
+  "#1f77b4", // Blue
+  "#ff7f0e", // Orange
+  "#2ca02c", // Green
+  "#d62728", // Red
+  "#9467bd", // Purple
+  "#8c564b", // Brown
+  "#e377c2", // Pink
+  "#7f7f7f", // Gray
+  "#bcbd22", // Yellow-green
+  "#17becf", // Cyan
+];
+
+// Format number to Indian numeral system (e.g., 1,00,000)
+const formatIndianNumber = (num) => {
+  const str = num.toString();
+  const lastThree = str.substring(str.length - 3);
+  const otherNumbers = str.substring(0, str.length - 3);
+  if (otherNumbers !== "") {
+    return otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + lastThree;
+  }
+  return lastThree;
+};
+
+// Format large numbers in Lakhs
+const formatInLakhs = (num) => {
+  if (num >= 100000) {
+    return (num / 100000).toFixed(2) + "L";
+  }
+  return "₹" + formatIndianNumber(Math.round(num));
+};
+
+// Format date to "01 Apr" format
+const formatDate = (dateStr) => {
+  const date = new Date(dateStr);
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = date.toLocaleString("en-US", { month: "short" });
+  return `${day} ${month}`;
+};
+
 export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -13,7 +54,6 @@ export default function Dashboard() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  // For displaying chart
   const [Recharts, setRecharts] = useState(null);
 
   useEffect(() => {
@@ -74,18 +114,21 @@ export default function Dashboard() {
 
   // Group daily trend by store for charting
   const chartDataByStore = {};
+  const uniqueStores = [];
+
   if (data.dailyTrend) {
     for (const record of data.dailyTrend) {
       const store = record.store_code;
       if (!chartDataByStore[store]) {
         chartDataByStore[store] = [];
+        uniqueStores.push(store);
       }
       
-      // Determine if weekday or weekend
       const isWeekend = record.dayOfWeek === 0 || record.dayOfWeek === 6;
       
       chartDataByStore[store].push({
         date: record.date,
+        formattedDate: formatDate(record.date),
         sales: record.sales,
         quantity: record.quantity,
         discount: record.discount,
@@ -190,17 +233,17 @@ export default function Dashboard() {
         <div className={styles.summaryCard}>
           <p className={styles.label}>Total Sales</p>
           <p className={styles.value}>
-            ₹{(data.totalSales / 100000).toFixed(2)}L
+            ₹{formatIndianNumber(Math.round(data.totalSales / 100000))}L
           </p>
         </div>
         <div className={styles.summaryCard}>
           <p className={styles.label}>Units Sold</p>
-          <p className={styles.value}>{data.totalQuantity}</p>
+          <p className={styles.value}>{formatIndianNumber(data.totalQuantity)}</p>
         </div>
         <div className={styles.summaryCard}>
           <p className={styles.label}>Total Discount</p>
           <p className={styles.value}>
-            ₹{(data.totalDiscounts / 100000).toFixed(2)}L
+            ₹{formatIndianNumber(Math.round(data.totalDiscounts / 100000))}L
           </p>
         </div>
         <div className={styles.summaryCard}>
@@ -209,54 +252,67 @@ export default function Dashboard() {
         </div>
         <div className={styles.summaryCard}>
           <p className={styles.label}>ASP</p>
-          <p className={styles.value}>₹{data.asp}</p>
+          <p className={styles.value}>₹{formatIndianNumber(data.asp)}</p>
         </div>
       </div>
 
-      {/* Last Month Averages */}
-      <div
-        style={{
-          marginTop: "2rem",
-          padding: "1rem",
-          backgroundColor: "#f0f0f0",
-          borderRadius: "8px",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "1rem",
-        }}
-      >
-        <div>
-          <p style={{ margin: "0 0 0.5rem 0", fontWeight: "bold" }}>
-            Last Month Weekday Avg
-          </p>
-          <p style={{ margin: 0, fontSize: "1.2rem" }}>
-            ₹{(data.lastMonthWeekdayAvg / 100000).toFixed(2)}L
-          </p>
+      {/* Historical Averages (only if data exists) */}
+      {(data.historicalWeekdayAvg !== null || data.historicalWeekendAvg !== null) && (
+        <div
+          style={{
+            marginTop: "2rem",
+            padding: "1rem",
+            backgroundColor: "#f0f0f0",
+            borderRadius: "8px",
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "1rem",
+          }}
+        >
+          {data.historicalWeekdayAvg !== null && (
+            <div>
+              <p style={{ margin: "0 0 0.5rem 0", fontWeight: "bold" }}>
+                Historical Weekday Avg
+              </p>
+              <p style={{ margin: 0, fontSize: "1.2rem" }}>
+                ₹{formatIndianNumber(Math.round(data.historicalWeekdayAvg / 100000))}L
+              </p>
+            </div>
+          )}
+          {data.historicalWeekendAvg !== null && (
+            <div>
+              <p style={{ margin: "0 0 0.5rem 0", fontWeight: "bold" }}>
+                Historical Weekend Avg
+              </p>
+              <p style={{ margin: 0, fontSize: "1.2rem" }}>
+                ₹{formatIndianNumber(Math.round(data.historicalWeekendAvg / 100000))}L
+              </p>
+            </div>
+          )}
         </div>
-        <div>
-          <p style={{ margin: "0 0 0.5rem 0", fontWeight: "bold" }}>
-            Last Month Weekend Avg
-          </p>
-          <p style={{ margin: 0, fontSize: "1.2rem" }}>
-            ₹{(data.lastMonthWeekendAvg / 100000).toFixed(2)}L
-          </p>
-        </div>
-      </div>
+      )}
 
       {/* Line Chart by Store */}
       {Recharts && Object.keys(chartDataByStore).length > 0 && (
         <div style={{ marginTop: "2rem" }}>
           <h2>Daily Sales Trend (by Store)</h2>
-          {Object.entries(chartDataByStore).map(([store, trendData]) => (
+          {Object.entries(chartDataByStore).map(([store, trendData], storeIdx) => (
             <div key={store} style={{ marginTop: "2rem", overflowX: "auto" }}>
               <h3>{store}</h3>
               <Recharts.LineChart width={1200} height={400} data={trendData}>
                 <Recharts.CartesianGrid strokeDasharray="3 3" />
                 <Recharts.XAxis
-                  dataKey="date"
+                  dataKey="formattedDate"
                   interval={Math.ceil(trendData.length / 10)}
                 />
-                <Recharts.YAxis />
+                <Recharts.YAxis
+                  tickFormatter={(value) => {
+                    if (value >= 100000) {
+                      return (value / 100000).toFixed(0) + "L";
+                    }
+                    return formatIndianNumber(Math.round(value));
+                  }}
+                />
                 <Recharts.Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
@@ -269,11 +325,12 @@ export default function Dashboard() {
                             padding: "10px",
                             border: "1px solid #ccc",
                             borderRadius: "4px",
+                            fontSize: "12px",
                           }}
                         >
                           <p style={{ margin: 0 }}>Date: {data.date}</p>
-                          <p style={{ margin: 0 }}>Sales: ₹{(data.sales / 100000).toFixed(2)}L</p>
-                          <p style={{ margin: 0 }}>Qty: {data.quantity}</p>
+                          <p style={{ margin: 0 }}>Sales: ₹{formatIndianNumber(Math.round(data.sales / 100000))}L</p>
+                          <p style={{ margin: 0 }}>Qty: {formatIndianNumber(data.quantity)}</p>
                           <p style={{ margin: 0 }}>{dayType}</p>
                         </div>
                       );
@@ -283,61 +340,101 @@ export default function Dashboard() {
                 />
                 <Recharts.Legend />
                 
-                {/* Actual sales line */}
+                {/* Store sales line */}
                 <Recharts.Line
                   type="monotone"
                   dataKey="sales"
-                  stroke="#8884d8"
-                  name="Daily Sales (₹)"
+                  stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]}
+                  name={`${store} Sales (₹)`}
                   connectNulls={true}
                   dot={(props) => {
                     const { cx, cy, payload } = props;
                     if (payload.isWeekend) {
                       return (
-                        <circle cx={cx} cy={cy} r={4} fill="#ff7300" />
+                        <circle cx={cx} cy={cy} r={4} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.5} />
                       );
                     }
-                    return <circle cx={cx} cy={cy} r={3} fill="#8884d8" />;
+                    return <circle cx={cx} cy={cy} r={3} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
                   }}
                 />
 
-                {/* Last month weekday average */}
-                <Recharts.ReferenceLine
-                  y={data.lastMonthWeekdayAvg}
-                  stroke="#82ca9d"
-                  strokeDasharray="5 5"
-                  name={`Last Month Weekday Avg (₹${(data.lastMonthWeekdayAvg / 100000).toFixed(2)}L)`}
-                  label="Last Month Weekday Avg"
-                />
+                {/* Historical averages (only render if data exists) */}
+                {data.historicalWeekdayAvg !== null && (
+                  <Recharts.ReferenceLine
+                    y={data.historicalWeekdayAvg}
+                    stroke="#000"
+                    strokeDasharray="5 5"
+                    name={`Historical Weekday Avg (₹${formatIndianNumber(Math.round(data.historicalWeekdayAvg / 100000))}L)`}
+                    label={{ value: "Weekday Avg", position: "right", fill: "#000" }}
+                  />
+                )}
 
-                {/* Last month weekend average */}
-                <Recharts.ReferenceLine
-                  y={data.lastMonthWeekendAvg}
-                  stroke="#ffc658"
-                  strokeDasharray="5 5"
-                  name={`Last Month Weekend Avg (₹${(data.lastMonthWeekendAvg / 100000).toFixed(2)}L)`}
-                  label="Last Month Weekend Avg"
-                />
+                {data.historicalWeekendAvg !== null && (
+                  <Recharts.ReferenceLine
+                    y={data.historicalWeekendAvg}
+                    stroke="#000"
+                    strokeDasharray="10 5"
+                    name={`Historical Weekend Avg (₹${formatIndianNumber(Math.round(data.historicalWeekendAvg / 100000))}L)`}
+                    label={{ value: "Weekend Avg", position: "right", fill: "#000" }}
+                  />
+                )}
               </Recharts.LineChart>
               
-              {/* Legend for weekend highlighting */}
-              <div style={{ marginTop: "1rem", fontSize: "14px" }}>
+              {/* Legend */}
+              <div style={{ marginTop: "1rem", fontSize: "12px" }}>
                 <span style={{ marginRight: "2rem" }}>
-                  <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: "#8884d8", marginRight: "0.5rem" }}></span>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: "12px",
+                      height: "12px",
+                      backgroundColor: STORE_COLORS[storeIdx % STORE_COLORS.length],
+                      marginRight: "0.5rem",
+                    }}
+                  ></span>
                   Weekday
                 </span>
                 <span style={{ marginRight: "2rem" }}>
-                  <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: "#ff7300", marginRight: "0.5rem" }}></span>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: "12px",
+                      height: "12px",
+                      backgroundColor: STORE_COLORS[storeIdx % STORE_COLORS.length],
+                      marginRight: "0.5rem",
+                      opacity: 0.5,
+                    }}
+                  ></span>
                   Weekend
                 </span>
-                <span style={{ marginRight: "2rem" }}>
-                  <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: "#82ca9d", marginRight: "0.5rem", border: "1px dashed #82ca9d" }}></span>
-                  Last Month Weekday Avg
-                </span>
-                <span>
-                  <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: "#ffc658", marginRight: "0.5rem", border: "1px dashed #ffc658" }}></span>
-                  Last Month Weekend Avg
-                </span>
+                {data.historicalWeekdayAvg !== null && (
+                  <span style={{ marginRight: "2rem" }}>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: "12px",
+                        height: "2px",
+                        backgroundColor: "#000",
+                        marginRight: "0.5rem",
+                      }}
+                    ></span>
+                    Historical Weekday Avg
+                  </span>
+                )}
+                {data.historicalWeekendAvg !== null && (
+                  <span>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: "12px",
+                        height: "2px",
+                        backgroundColor: "#000",
+                        marginRight: "0.5rem",
+                      }}
+                    ></span>
+                    Historical Weekend Avg
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -372,11 +469,11 @@ export default function Dashboard() {
                           : "white",
                     }}
                   >
-                    <td>{day.date}</td>
+                    <td>{formatDate(day.date)}</td>
                     <td>{day.store_code}</td>
-                    <td>₹{(day.sales / 100000).toFixed(2)}L</td>
-                    <td>{day.quantity}</td>
-                    <td>₹{(day.discount / 10000).toFixed(1)}K</td>
+                    <td>₹{formatIndianNumber(Math.round(day.sales / 100000))}L</td>
+                    <td>{formatIndianNumber(day.quantity)}</td>
+                    <td>₹{formatIndianNumber(Math.round(day.discount / 10000))}K</td>
                     <td>{dayType}</td>
                   </tr>
                 );
@@ -409,11 +506,11 @@ export default function Dashboard() {
                   <td>{store.store_name}</td>
                   <td>{store.city}</td>
                   <td>{store.region}</td>
-                  <td>₹{(store.sales / 100000).toFixed(2)}L</td>
-                  <td>{store.quantity}</td>
-                  <td>₹{(store.discount / 10000).toFixed(1)}K</td>
+                  <td>₹{formatIndianNumber(Math.round(store.sales / 100000))}L</td>
+                  <td>{formatIndianNumber(store.quantity)}</td>
+                  <td>₹{formatIndianNumber(Math.round(store.discount / 10000))}K</td>
                   <td>{store.discount_percent.toFixed(2)}%</td>
-                  <td>₹{store.asp}</td>
+                  <td>₹{formatIndianNumber(store.asp)}</td>
                 </tr>
               ))}
             </tbody>
