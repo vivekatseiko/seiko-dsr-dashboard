@@ -227,13 +227,16 @@ export default function Upload() {
               setMessage(`Found ${allRecords.length} records from ${processedSheets} sheet(s). Uploading... (Skipped: ${skippedSheets})`);
 
               const userEmail = localStorage.getItem("userEmail") || "unknown";
+              
+              // Get the store code from the first record (all records have same store code per sheet)
+              const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
 
               const response = await fetch("/api/upload", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   records: allRecords,
-                  storeCode: storeCode,
+                  storeCode: uploadStoreCode,
                   userEmail,
                 }),
               });
