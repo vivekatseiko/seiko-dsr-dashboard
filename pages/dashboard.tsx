@@ -45,3 +45,21 @@ export default function Dashboard() {
       <h1>📊 Summary (MTD - Month to Date)</h1>
 
       <div className={styles.filters}>
+        <div className={styles.filterGroup}>
+          <label>Store:</label>
+          <select value={storeCode} onChange={(e) => setStoreCode(e.target.value)}>
+            <option value="all">All Stores</option>
+            <option value="SWSPHPLUK">Phoenix Palassio (Lucknow)</option>
+            <option value="SWSPMCMUM">Phoenix Market City Kurla (Mumbai)</option>
+            <option value="SWSPMMPNE">Phoenix Mall of the Millennium (Pune)</option>
+            <option value="SWSSCMHYD">Sarath City Mall (Hyderabad)</option>
+            <option value="SWSMOABLR">Mall of Asia - Seiko (Bengaluru)</option>
+          </select>
+        </div>
+
+        <div className={styles.filterGroup}>
+          <label>Start Date:</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) =>
