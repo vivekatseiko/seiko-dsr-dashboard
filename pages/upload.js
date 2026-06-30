@@ -24,7 +24,7 @@ export default function Upload() {
 
           // Load XLSX library
           const script = document.createElement("script");
-          script.src = "https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js";
+          script.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
           script.onerror = () => {
             setMessage("❌ Failed to load Excel library. Please try again.");
             setMessageType("error");
