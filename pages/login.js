@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/router";
 import styles from "../styles/Auth.module.css";
 
@@ -9,7 +9,7 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
@@ -29,12 +29,10 @@ export default function Login() {
         return;
       }
 
-      // Store session and role
       localStorage.setItem("sessionToken", data.token);
       localStorage.setItem("userRole", data.role);
       localStorage.setItem("userEmail", data.email);
 
-      // Redirect to dashboard
       router.push("/dashboard");
     } catch (err) {
       setError("Network error. Please try again.");
