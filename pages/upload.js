@@ -19,8 +19,7 @@ export default function Upload() {
     reader.onload = async (event) => {
       try {
         const script = document.createElement("script");
-        script.src =
-          "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js";
+        script.src = "https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js";
         script.onload = async () => {
           const XLSX = window.XLSX;
           const workbook = XLSX.read(event.target.result, { type: "array" });
