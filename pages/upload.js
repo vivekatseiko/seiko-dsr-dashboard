@@ -233,7 +233,7 @@ export default function Upload() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   records: allRecords,
-                  storeCode: "MULTI",
+                  storeCode: storeCode,
                   userEmail,
                 }),
               });
