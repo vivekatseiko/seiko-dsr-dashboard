@@ -22,28 +22,79 @@ export default async function handler(req, res) {
     const finalStartDate = startDate || firstDayOfMonth.toISOString().split("T")[0];
     const finalEndDate = endDate || today.toISOString().split("T")[0];
 
-    console.log(`Date range: ${finalStartDate} to ${finalEndDate}`);
+    // Calculate last month dates
+    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+    const lastMonthStart = new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1);
+    const lastMonthStartStr = lastMonthStart.toISOString().split("T")[0];
+    const lastMonthEndStr = lastMonthEnd.toISOString().split("T")[0];
 
+    console.log(`Current month: ${finalStartDate} to ${finalEndDate}`);
+    console.log(`Last month: ${lastMonthStartStr} to ${lastMonthEndStr}`);
+
+    // Fetch current month data
     let query = supabase
       .from("sales_master")
       .select("*, store_master(store_name, city, region)")
       .gte("transaction_date", finalStartDate)
       .lte("transaction_date", finalEndDate);
 
-    // Filter by store code
     if (storeCode !== "all") {
       query = query.eq("store_code", storeCode.toUpperCase());
     }
 
-    const { data, error } = await query;
+    const { data: currentData, error: currentError } = await query;
 
-    if (error) {
-      console.error("❌ Supabase error:", error);
-      return res.status(500).json({ error: error.message });
+    if (currentError) {
+      console.error("❌ Supabase error:", currentError);
+      return res.status(500).json({ error: currentError.message });
     }
 
-    if (!data || data.length === 0) {
-      console.log("⚠️ No data found for this date range");
+    // Fetch last month data for comparison
+    let lastMonthQuery = supabase
+      .from("sales_master")
+      .select("transaction_date, net_value, quantity")
+      .gte("transaction_date", lastMonthStartStr)
+      .lte("transaction_date", lastMonthEndStr);
+
+    if (storeCode !== "all") {
+      lastMonthQuery = lastMonthQuery.eq("store_code", storeCode.toUpperCase());
+    }
+
+    const { data: lastMonthData, error: lastMonthError } = await lastMonthQuery;
+
+    if (lastMonthError) {
+      console.error("❌ Last month error:", lastMonthError);
+      return res.status(500).json({ error: lastMonthError.message });
+    }
+
+    // Calculate last month weekday/weekend averages
+    let lastMonthWeekdayTotal = 0;
+    let lastMonthWeekdayCount = 0;
+    let lastMonthWeekendTotal = 0;
+    let lastMonthWeekendCount = 0;
+
+    if (lastMonthData && lastMonthData.length > 0) {
+      for (const record of lastMonthData) {
+        const date = new Date(record.transaction_date);
+        const dayOfWeek = date.getDay();
+        const netValue = parseFloat(record.net_value || 0);
+
+        // 0 = Sunday, 6 = Saturday
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+          lastMonthWeekendTotal += netValue;
+          lastMonthWeekendCount++;
+        } else {
+          lastMonthWeekdayTotal += netValue;
+          lastMonthWeekdayCount++;
+        }
+      }
+    }
+
+    const lastMonthWeekdayAvg = lastMonthWeekdayCount > 0 ? lastMonthWeekdayTotal / lastMonthWeekdayCount : 0;
+    const lastMonthWeekendAvg = lastMonthWeekendCount > 0 ? lastMonthWeekendTotal / lastMonthWeekendCount : 0;
+
+    if (!currentData || currentData.length === 0) {
+      console.log("⚠️ No data found for current period");
       return res.status(200).json({
         totalSales: 0,
         totalQuantity: 0,
@@ -55,10 +106,12 @@ export default async function handler(req, res) {
         cities: [],
         regions: [],
         stores: [],
+        lastMonthWeekdayAvg: parseFloat(lastMonthWeekdayAvg.toFixed(2)),
+        lastMonthWeekendAvg: parseFloat(lastMonthWeekendAvg.toFixed(2)),
       });
     }
 
-    console.log(`✅ Found ${data.length} records`);
+    console.log(`✅ Found ${currentData.length} records`);
 
     // Extract unique cities, regions, and stores
     const citiesSet = new Set();
@@ -73,8 +126,9 @@ export default async function handler(req, res) {
 
     const dailyDataByStore = {};
     const storeMetrics = {};
+    const allDates = new Set();
 
-    for (const record of data) {
+    for (const record of currentData) {
       const netValue = parseFloat(record.net_value || 0);
       const quantity = parseInt(record.quantity || 0);
       const discountValue = parseFloat(record.discount_value || 0);
@@ -82,6 +136,8 @@ export default async function handler(req, res) {
       const date = record.transaction_date || "Unknown";
       const code = record.store_code || "Unknown";
       
+      allDates.add(date);
+
       // Extract store info
       const storeName = record.store_master?.store_name || code;
       const cityName = record.store_master?.city || "Unknown";
@@ -128,11 +184,34 @@ export default async function handler(req, res) {
           sales: 0,
           quantity: 0,
           discount: 0,
+          dayOfWeek: new Date(date).getDay(),
         };
       }
       dailyDataByStore[key].sales += netValue;
       dailyDataByStore[key].quantity += quantity;
       dailyDataByStore[key].discount += discountValue;
+    }
+
+    // Fill missing dates with 0 for each store
+    const sortedDates = Array.from(allDates).sort();
+    const storesInData = new Set(currentData.map((r) => r.store_code));
+
+    for (const store of storesInData) {
+      for (const date of sortedDates) {
+        const key = `${store}|${date}`;
+        if (!dailyDataByStore[key]) {
+          const storeName = storeMetrics[store]?.store_name || store;
+          dailyDataByStore[key] = {
+            store_code: store,
+            store_name: storeName,
+            date: date,
+            sales: 0,
+            quantity: 0,
+            discount: 0,
+            dayOfWeek: new Date(date).getDay(),
+          };
+        }
+      }
     }
 
     // Calculate ASP and average discount for each store
@@ -167,6 +246,8 @@ export default async function handler(req, res) {
       cities: Array.from(citiesSet).sort(),
       regions: Array.from(regionsSet).sort(),
       stores: Array.from(storesSet.values()).sort((a, b) => a.name.localeCompare(b.name)),
+      lastMonthWeekdayAvg: parseFloat(lastMonthWeekdayAvg.toFixed(2)),
+      lastMonthWeekendAvg: parseFloat(lastMonthWeekendAvg.toFixed(2)),
     });
   } catch (error) {
     console.error("❌ Dashboard error:", error);
