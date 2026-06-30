@@ -25,7 +25,7 @@ export default async function handler(req, res) {
         uploaded_by: userEmail,
         file_name: `${storeCode}_${new Date().toISOString()}.xlsx`,
         status: "Processing",
-        total_records: records.length,
+        total_rows_in_file: records.length,
       })
       .select()
       .single();
@@ -34,43 +34,55 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to create upload log" });
     }
 
-    // Call Edge Function
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/process-sales-upload`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-        body: JSON.stringify({
-          records,
-          storeCode,
-          uploadId: uploadLog.id,
-        }),
+    // Insert directly instead of calling Edge Function
+    try {
+      const { error: insertError } = await supabase
+        .from("sales_master")
+        .insert(
+          records.map((r) => ({
+            store_code: storeCode,
+            transaction_date: r.transaction_date,
+            system_invoice_number: r.system_invoice_number,
+            model_number: r.model_number,
+            qty: r.qty,
+            serial_number: r.serial_number,
+            mrp: r.mrp,
+            net_value: r.net_value,
+            discount_value: r.discount_value,
+            discount_percent: r.discount_percent,
+            family: r.family,
+            calibre: r.calibre,
+          }))
+        );
+
+      if (insertError) {
+        throw insertError;
       }
-    );
 
-    const edgeFunctionResult = await response.json();
+      // Update status
+      await supabase
+        .from("sales_uploads_log")
+        .update({ status: "Completed" })
+        .eq("id", uploadLog.id);
 
-    if (!response.ok) {
-      return res
-        .status(500)
-        .json({ error: edgeFunctionResult.error || "Edge function failed" });
+      return res.status(200).json({
+        success: true,
+        uploadId: uploadLog.id,
+        recordsInserted: records.length,
+        storeCode,
+      });
+    } catch (err) {
+      // If insert fails, update log with error
+      await supabase
+        .from("sales_uploads_log")
+        .update({ 
+          status: "Failed",
+          error_message: err.message 
+        })
+        .eq("id", uploadLog.id);
+
+      return res.status(500).json({ error: err.message });
     }
-
-    // Update upload log
-    await supabase
-      .from("sales_uploads_log")
-      .update({ status: "Completed" })
-      .eq("id", uploadLog.id);
-
-    return res.status(200).json({
-      success: true,
-      uploadId: uploadLog.id,
-      recordsInserted: records.length,
-      storeCode,
-    });
   } catch (error) {
     console.error("Upload error:", error);
     return res.status(500).json({ error: error.message });
