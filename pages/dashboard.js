@@ -17,13 +17,28 @@ const STORE_COLORS = [
 
 // Format number to Indian numeral system (e.g., 1,00,000)
 const formatIndianNumber = (num) => {
-  const str = num.toString();
+  const str = Math.round(num).toString();
   const lastThree = str.substring(str.length - 3);
   const otherNumbers = str.substring(0, str.length - 3);
   if (otherNumbers !== "") {
     return otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + lastThree;
   }
   return lastThree;
+};
+
+// Format Y-axis values (K, L, Cr)
+const formatYAxisValue = (value) => {
+  if (value >= 10000000) {
+    // Crores
+    return (value / 10000000).toFixed(0) + "Cr";
+  } else if (value >= 100000) {
+    // Lakhs
+    return (value / 100000).toFixed(1) + "L";
+  } else if (value >= 1000) {
+    // Thousands
+    return (value / 1000).toFixed(0) + "K";
+  }
+  return Math.round(value).toString();
 };
 
 // Format large numbers in Lakhs
@@ -36,10 +51,39 @@ const formatInLakhs = (num) => {
 
 // Format date to "01 Apr" format
 const formatDate = (dateStr) => {
-  const date = new Date(dateStr);
+  const date = new Date(dateStr + "T00:00:00");
   const day = String(date.getDate()).padStart(2, "0");
   const month = date.toLocaleString("en-US", { month: "short" });
   return `${day} ${month}`;
+};
+
+// Custom shape for weekend background
+const WeekendBackground = (props) => {
+  const { x, y, width, height, data } = props;
+
+  if (!data || data.length === 0) return null;
+
+  const xScale = width / data.length;
+  const backgrounds = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const point = data[i];
+    if (point.isWeekend) {
+      backgrounds.push(
+        <rect
+          key={`weekend-${i}`}
+          x={i * xScale}
+          y={y}
+          width={xScale}
+          height={height}
+          fill="#fff3e0"
+          fillOpacity={0.5}
+        />
+      );
+    }
+  }
+
+  return <g>{backgrounds}</g>;
 };
 
 export default function Dashboard() {
@@ -299,19 +343,52 @@ export default function Dashboard() {
           {Object.entries(chartDataByStore).map(([store, trendData], storeIdx) => (
             <div key={store} style={{ marginTop: "2rem", overflowX: "auto" }}>
               <h3>{store}</h3>
-              <Recharts.LineChart width={1200} height={400} data={trendData}>
+              <Recharts.LineChart
+                width={1200}
+                height={400}
+                data={trendData}
+                margin={{ top: 5, right: 30, left: 0, bottom: 5 }}
+              >
+                {/* Weekend background highlighting */}
+                <Recharts.ReferenceLine
+                  isFront={false}
+                  alwaysShow={true}
+                  shape={(props) => {
+                    const { xAxis, yAxis } = props.chartInstance || {};
+                    if (!xAxis || !yAxis) return null;
+
+                    const backgrounds = [];
+                    for (let i = 0; i < trendData.length; i++) {
+                      if (trendData[i].isWeekend) {
+                        const x = xAxis.p2c(i);
+                        const nextX = i < trendData.length - 1 ? xAxis.p2c(i + 1) : xAxis.p2c(i) + 50;
+                        backgrounds.push(
+                          <rect
+                            key={`weekend-${i}`}
+                            x={x}
+                            y={yAxis.p2c(yAxis.domain[1])}
+                            width={nextX - x}
+                            height={yAxis.p2c(yAxis.domain[0]) - yAxis.p2c(yAxis.domain[1])}
+                            fill="#fff3e0"
+                            fillOpacity={0.6}
+                          />
+                        );
+                      }
+                    }
+                    return <g>{backgrounds}</g>;
+                  }}
+                />
+
                 <Recharts.CartesianGrid strokeDasharray="3 3" />
                 <Recharts.XAxis
                   dataKey="formattedDate"
-                  interval={Math.ceil(trendData.length / 10)}
+                  interval={Math.max(0, Math.ceil(trendData.length / 12) - 1)}
+                  angle={-45}
+                  textAnchor="end"
+                  height={80}
                 />
                 <Recharts.YAxis
-                  tickFormatter={(value) => {
-                    if (value >= 100000) {
-                      return (value / 100000).toFixed(0) + "L";
-                    }
-                    return formatIndianNumber(Math.round(value));
-                  }}
+                  tickFormatter={formatYAxisValue}
                 />
                 <Recharts.Tooltip
                   content={({ active, payload }) => {
@@ -351,21 +428,22 @@ export default function Dashboard() {
                     const { cx, cy, payload } = props;
                     if (payload.isWeekend) {
                       return (
-                        <circle cx={cx} cy={cy} r={4} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.5} />
+                        <circle cx={cx} cy={cy} r={4} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.6} />
                       );
                     }
                     return <circle cx={cx} cy={cy} r={3} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
                   }}
                 />
 
-                {/* Historical averages (only render if data exists) */}
+                {/* Historical averages */}
                 {data.historicalWeekdayAvg !== null && (
                   <Recharts.ReferenceLine
                     y={data.historicalWeekdayAvg}
                     stroke="#000"
                     strokeDasharray="5 5"
+                    strokeWidth={2}
                     name={`Historical Weekday Avg (₹${formatIndianNumber(Math.round(data.historicalWeekdayAvg / 100000))}L)`}
-                    label={{ value: "Weekday Avg", position: "right", fill: "#000" }}
+                    label={{ value: "Weekday Avg", position: "right", fill: "#000", fontSize: 12 }}
                   />
                 )}
 
@@ -374,15 +452,16 @@ export default function Dashboard() {
                     y={data.historicalWeekendAvg}
                     stroke="#000"
                     strokeDasharray="10 5"
+                    strokeWidth={2}
                     name={`Historical Weekend Avg (₹${formatIndianNumber(Math.round(data.historicalWeekendAvg / 100000))}L)`}
-                    label={{ value: "Weekend Avg", position: "right", fill: "#000" }}
+                    label={{ value: "Weekend Avg", position: "right", fill: "#000", fontSize: 12 }}
                   />
                 )}
               </Recharts.LineChart>
               
               {/* Legend */}
-              <div style={{ marginTop: "1rem", fontSize: "12px" }}>
-                <span style={{ marginRight: "2rem" }}>
+              <div style={{ marginTop: "1rem", fontSize: "12px", display: "flex", flexWrap: "wrap", gap: "2rem" }}>
+                <span>
                   <span
                     style={{
                       display: "inline-block",
@@ -394,7 +473,7 @@ export default function Dashboard() {
                   ></span>
                   Weekday
                 </span>
-                <span style={{ marginRight: "2rem" }}>
+                <span>
                   <span
                     style={{
                       display: "inline-block",
@@ -402,13 +481,16 @@ export default function Dashboard() {
                       height: "12px",
                       backgroundColor: STORE_COLORS[storeIdx % STORE_COLORS.length],
                       marginRight: "0.5rem",
-                      opacity: 0.5,
+                      opacity: 0.6,
                     }}
                   ></span>
                   Weekend
                 </span>
+                <span style={{ backgroundColor: "#fff3e0", padding: "2px 6px", borderRadius: "3px" }}>
+                  Weekend Highlight
+                </span>
                 {data.historicalWeekdayAvg !== null && (
-                  <span style={{ marginRight: "2rem" }}>
+                  <span>
                     <span
                       style={{
                         display: "inline-block",
@@ -430,6 +512,7 @@ export default function Dashboard() {
                         height: "2px",
                         backgroundColor: "#000",
                         marginRight: "0.5rem",
+                        position: "relative",
                       }}
                     ></span>
                     Historical Weekend Avg
