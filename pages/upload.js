@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
+import styles from "../styles/Upload.module.css";
 
 export default function Upload() {
   const router = useRouter();
@@ -17,7 +18,6 @@ export default function Upload() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        // Load xlsx library from CDN
         const script = document.createElement("script");
         script.src =
           "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js";
@@ -34,7 +34,6 @@ export default function Upload() {
             return;
           }
 
-          // Auto-detect store code
           const firstRow = jsonData[0];
           let storeCode = null;
 
@@ -51,7 +50,6 @@ export default function Upload() {
             return;
           }
 
-          // Transform data
           const records = jsonData.map((row) => ({
             store_code: storeCode.toString().toUpperCase(),
             transaction_date: row["Date"] || row["date"] || "",
@@ -69,7 +67,6 @@ export default function Upload() {
 
           const userEmail = localStorage.getItem("userEmail") || "unknown";
 
-          // Upload to backend
           const response = await fetch("/api/upload", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
