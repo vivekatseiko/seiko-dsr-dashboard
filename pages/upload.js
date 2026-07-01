@@ -1,12 +1,36 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
+import styles from "../styles/Dashboard.module.css";
+
+const formatIndianNumber = (num) => {
+  const str = Math.round(num).toString();
+  const lastThree = str.substring(str.length - 3);
+  const otherNumbers = str.substring(0, str.length - 3);
+  if (otherNumbers !== "") {
+    return otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + lastThree;
+  }
+  return lastThree;
+};
 
 export default function Upload() {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState("sales");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   const [fileType, setFileType] = useState("sales");
+
+  // Targets Management State
+  const [targets, setTargets] = useState([]);
+  const [targetsLoading, setTargetsLoading] = useState(true);
+  const [targetsError, setTargetsError] = useState("");
+  const [filterStore, setFilterStore] = useState("all");
+  const [filterMonth, setFilterMonth] = useState("all");
+  const [filterYear, setFilterYear] = useState("all");
+  const [stores, setStores] = useState([]);
+  const [years, setYears] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [editData, setEditData] = useState({});
 
   const VALID_STORE_CODES = [
     "SBTEXACHN", "SBTFALBLR", "SBTSCMKOL", "SBTBRVMUM", "SBTDLFNOI",
@@ -15,6 +39,126 @@ export default function Upload() {
     "SWSSCMHYD", "SWSLULKOC", "SWSCAMKOL", "SWSUNMDEL", "SWSPHPLUK",
     "SBTPMCPNE",
   ];
+
+  const months = Array.from({ length: 12 }, (_, i) => i + 1);
+
+  useEffect(() => {
+    if (activeTab === "targets") {
+      fetchTargets();
+    }
+  }, [activeTab, filterStore, filterMonth, filterYear]);
+
+  const fetchTargets = async () => {
+    setTargetsLoading(true);
+    setTargetsError("");
+    try {
+      const params = new URLSearchParams();
+      if (filterStore !== "all") params.append("store_code", filterStore);
+      if (filterMonth !== "all") params.append("month", filterMonth);
+      if (filterYear !== "all") params.append("year", filterYear);
+
+      const response = await fetch(`/api/targets?${params.toString()}`);
+      const result = await response.json();
+
+      if (!response.ok) {
+        setTargetsError(result.error || "Failed to fetch targets");
+        setTargets([]);
+      } else {
+        setTargets(result.data || []);
+
+        if (result.data && result.data.length > 0) {
+          const uniqueStores = [...new Set(result.data.map(t => t.store_code))].sort();
+          const uniqueYears = [...new Set(result.data.map(t => t.target_year))].sort((a, b) => b - a);
+          setStores(uniqueStores);
+          setYears(uniqueYears);
+        }
+      }
+    } catch (err) {
+      setTargetsError(err.message);
+      setTargets([]);
+    } finally {
+      setTargetsLoading(false);
+    }
+  };
+
+  const handleEditTarget = (target) => {
+    setEditingId(target.id);
+    setEditData({ ...target });
+  };
+
+  const handleSaveTarget = async (id) => {
+    if (!editData.value_target || editData.value_target <= 0) {
+      setMessage("❌ Value target must be greater than 0");
+      setMessageType("error");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/targets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          store_code: editData.store_code,
+          target_month: editData.target_month,
+          target_year: editData.target_year,
+          value_target: editData.value_target,
+          calibre_1_name: editData.calibre_1_name || null,
+          calibre_1_qty_target: editData.calibre_1_qty_target || null,
+          calibre_2_name: editData.calibre_2_name || null,
+          calibre_2_qty_target: editData.calibre_2_qty_target || null,
+          calibre_3_name: editData.calibre_3_name || null,
+          calibre_3_qty_target: editData.calibre_3_qty_target || null,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setMessage(`❌ Update failed: ${result.error}`);
+        setMessageType("error");
+      } else {
+        setMessage("✅ Target updated successfully");
+        setMessageType("success");
+        setEditingId(null);
+        fetchTargets();
+        setTimeout(() => setMessage(""), 2000);
+      }
+    } catch (err) {
+      setMessage(`❌ Error: ${err.message}`);
+      setMessageType("error");
+    }
+  };
+
+  const handleDeleteTarget = async (id) => {
+    if (!confirm("Are you sure you want to delete this target?")) return;
+
+    try {
+      const response = await fetch(`/api/targets?id=${id}`, {
+        method: "DELETE",
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setMessage(`❌ Delete failed: ${result.error}`);
+        setMessageType("error");
+      } else {
+        setMessage("✅ Target deleted successfully");
+        setMessageType("success");
+        fetchTargets();
+        setTimeout(() => setMessage(""), 2000);
+      }
+    } catch (err) {
+      setMessage(`❌ Error: ${err.message}`);
+      setMessageType("error");
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditData({});
+  };
 
   const isValidStoreCode = (code) => {
     if (!code) return false;
@@ -59,7 +203,7 @@ export default function Upload() {
 
           const script = document.createElement("script");
           script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
-          
+
           script.onerror = () => {
             setMessage("❌ Failed to load Excel library.");
             setMessageType("error");
@@ -78,7 +222,6 @@ export default function Upload() {
               let targetRecords = [];
               let processedRows = 0;
 
-              // Start from row 1 (skip header at row 0)
               for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row || row.length < 4) continue;
@@ -139,11 +282,13 @@ export default function Upload() {
                 return;
               }
 
-              setMessage(
-                `✅ Success! Uploaded ${result.recordsInserted} target records`
-              );
+              setMessage(`✅ Success! Uploaded ${result.recordsInserted} target records`);
               setMessageType("success");
-              setTimeout(() => router.push("/targets-management"), 2000);
+              setLoading(false);
+              setTimeout(() => {
+                setMessage("");
+                fetchTargets();
+              }, 2000);
             } catch (err) {
               console.error("Error:", err);
               setMessage(`❌ Error: ${err.message}`);
@@ -183,7 +328,7 @@ export default function Upload() {
 
           const script = document.createElement("script");
           script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
-          
+
           script.onerror = () => {
             setMessage("❌ Failed to load Excel library.");
             setMessageType("error");
@@ -204,7 +349,7 @@ export default function Upload() {
               for (const sheetName of workbook.SheetNames) {
                 try {
                   const sheet = workbook.Sheets[sheetName];
-                  
+
                   const storeCodeCell = sheet["B3"];
                   const sheetStoreCode = storeCodeCell?.v;
 
@@ -290,7 +435,7 @@ export default function Upload() {
 
                     const mrp = parseFloat(row[5] || 0);
                     const netValue = parseFloat(row[6] || 0);
-                    
+
                     const discountValue = mrp - netValue;
                     const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
 
@@ -386,78 +531,62 @@ export default function Upload() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (fileType === "sales") {
-      handleSalesFileUpload(file);
-    } else {
-      handleTargetFileUpload(file);
+    if (activeTab === "sales") {
+      if (fileType === "sales") {
+        handleSalesFileUpload(file);
+      } else {
+        handleTargetFileUpload(file);
+      }
     }
   };
 
   return (
-    <div style={{ padding: "2rem", maxWidth: "600px", margin: "0 auto" }}>
-      <h1>📤 Upload Files</h1>
+    <div className={styles.container}>
+      <h1>📤 Upload & Manage</h1>
 
-      {/* File Type Selector */}
-      <div style={{ marginBottom: "1.5rem" }}>
-        <label style={{ fontWeight: "bold", marginBottom: "0.5rem", display: "block" }}>
-          Select File Type:
-        </label>
-        <select 
-          value={fileType} 
-          onChange={(e) => setFileType(e.target.value)}
-          style={{
-            padding: "0.75rem",
-            borderRadius: "4px",
-            border: "1px solid #ccc",
-            fontSize: "14px",
-            width: "100%",
-          }}
-        >
-          <option value="sales">Sales Data File</option>
-          <option value="target">Sales Target File</option>
-        </select>
-      </div>
-
-      {/* Instructions */}
-      <div style={{
-        backgroundColor: "#e3f2fd",
-        padding: "1rem",
-        borderRadius: "4px",
-        marginBottom: "1.5rem",
-        fontSize: "13px",
-        color: "#1565c0",
-      }}>
-        {fileType === "sales" ? (
-          <p>📊 <strong>Sales Data File:</strong> Upload Excel file with monthly sheets containing sales transactions (Date, Invoice #, Model, etc.)</p>
-        ) : (
-          <p>🎯 <strong>Sales Target File:</strong> Upload CSV/Excel with columns: Store code, Month, Year, Value target, Calibre 1, Calibre 1 target, Calibre 2, Calibre 2 target, Calibre 3, Calibre 3 target</p>
-        )}
-      </div>
-
-      {/* File Upload */}
+      {/* Tabs */}
       <div
         style={{
-          border: "2px dashed #ccc",
-          padding: "2rem",
-          textAlign: "center",
-          borderRadius: "8px",
-          marginTop: "2rem",
+          display: "flex",
+          gap: "1rem",
+          marginBottom: "2rem",
+          borderBottom: "2px solid #ddd",
         }}
       >
-        <input
-          type="file"
-          accept={fileType === "sales" ? ".xlsx,.xls" : ".csv,.xlsx,.xls"}
-          onChange={handleFileUpload}
-          disabled={loading}
-        />
+        <button
+          onClick={() => setActiveTab("sales")}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: activeTab === "sales" ? "#2196F3" : "transparent",
+            color: activeTab === "sales" ? "white" : "#333",
+            border: "none",
+            cursor: "pointer",
+            fontWeight: activeTab === "sales" ? "bold" : "normal",
+          }}
+        >
+          📤 Upload Sales & Targets
+        </button>
+        <button
+          onClick={() => setActiveTab("targets")}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: activeTab === "targets" ? "#2196F3" : "transparent",
+            color: activeTab === "targets" ? "white" : "#333",
+            border: "none",
+            cursor: "pointer",
+            fontWeight: activeTab === "targets" ? "bold" : "normal",
+          }}
+        >
+          🎯 Manage Targets
+        </button>
       </div>
 
       {/* Message */}
       {message && (
         <div
           style={{
-            marginTop: "1rem",
             padding: "1rem",
+            marginBottom: "1rem",
             borderRadius: "4px",
             backgroundColor:
               messageType === "success"
@@ -480,6 +609,344 @@ export default function Upload() {
           }}
         >
           {message}
+        </div>
+      )}
+
+      {/* TAB 1: Upload Sales & Targets */}
+      {activeTab === "sales" && (
+        <div>
+          {/* File Type Selector */}
+          <div style={{ marginBottom: "1.5rem" }}>
+            <label style={{ fontWeight: "bold", marginBottom: "0.5rem", display: "block" }}>
+              Select File Type:
+            </label>
+            <select
+              value={fileType}
+              onChange={(e) => setFileType(e.target.value)}
+              style={{
+                padding: "0.75rem",
+                borderRadius: "4px",
+                border: "1px solid #ccc",
+                fontSize: "14px",
+                width: "100%",
+                maxWidth: "300px",
+              }}
+            >
+              <option value="sales">Sales Data File</option>
+              <option value="target">Sales Target File</option>
+            </select>
+          </div>
+
+          {/* Instructions */}
+          <div
+            style={{
+              backgroundColor: "#e3f2fd",
+              padding: "1rem",
+              borderRadius: "4px",
+              marginBottom: "1.5rem",
+              fontSize: "13px",
+              color: "#1565c0",
+            }}
+          >
+            {fileType === "sales" ? (
+              <p>📊 <strong>Sales Data File:</strong> Upload Excel file with monthly sheets containing sales transactions (Date, Invoice #, Model, etc.)</p>
+            ) : (
+              <p>🎯 <strong>Sales Target File:</strong> Upload CSV/Excel with columns: Store code, Month, Year, Value target, Calibre 1, Calibre 1 target, Calibre 2, Calibre 2 target, Calibre 3, Calibre 3 target</p>
+            )}
+          </div>
+
+          {/* File Upload */}
+          <div
+            style={{
+              border: "2px dashed #ccc",
+              padding: "2rem",
+              textAlign: "center",
+              borderRadius: "8px",
+              marginTop: "2rem",
+            }}
+          >
+            <input
+              type="file"
+              accept={fileType === "sales" ? ".xlsx,.xls" : ".csv,.xlsx,.xls"}
+              onChange={handleFileUpload}
+              disabled={loading}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: Manage Targets */}
+      {activeTab === "targets" && (
+        <div>
+          {/* Filters */}
+          <div
+            style={{
+              backgroundColor: "#f5f5f5",
+              padding: "1.5rem",
+              borderRadius: "8px",
+              marginBottom: "2rem",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "1rem",
+            }}
+          >
+            <div>
+              <label>Store:</label>
+              <select value={filterStore} onChange={(e) => setFilterStore(e.target.value)}>
+                <option value="all">All Stores</option>
+                {stores.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Month:</label>
+              <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+                <option value="all">All Months</option>
+                {months.map(m => (
+                  <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Year:</label>
+              <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+                <option value="all">All Years</option>
+                {years.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Error */}
+          {targetsError && (
+            <div
+              style={{
+                padding: "1rem",
+                marginBottom: "1rem",
+                borderRadius: "4px",
+                backgroundColor: "#fee2e2",
+                color: "#991b1b",
+                border: "1px solid #fca5a5",
+              }}
+            >
+              ❌ {targetsError}
+            </div>
+          )}
+
+          {/* Loading */}
+          {targetsLoading && <p>Loading targets...</p>}
+
+          {/* Table */}
+          {!targetsLoading && targets.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "12px",
+                }}
+              >
+                <thead>
+                  <tr style={{ backgroundColor: "#f0f0f0" }}>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "left" }}>Store</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Month</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Year</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>Value Target</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Calibre 1</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Qty</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Calibre 2</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Qty</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Calibre 3</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Qty</th>
+                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {targets.map((target) => (
+                    <tr key={target.id} style={{ borderBottom: "1px solid #ddd" }}>
+                      {editingId === target.id ? (
+                        <>
+                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
+                            <input
+                              type="text"
+                              value={editData.store_code}
+                              disabled
+                              style={{ width: "100%", padding: "4px" }}
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
+                            <input
+                              type="number"
+                              min="1"
+                              max="12"
+                              value={editData.target_month}
+                              onChange={(e) => setEditData({ ...editData, target_month: parseInt(e.target.value) })}
+                              style={{ width: "60px", padding: "4px" }}
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
+                            <input
+                              type="number"
+                              value={editData.target_year}
+                              onChange={(e) => setEditData({ ...editData, target_year: parseInt(e.target.value) })}
+                              style={{ width: "80px", padding: "4px" }}
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>
+                            <input
+                              type="number"
+                              value={editData.value_target}
+                              onChange={(e) => setEditData({ ...editData, value_target: parseFloat(e.target.value) })}
+                              style={{ width: "100%", padding: "4px" }}
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
+                            <input
+                              type="text"
+                              value={editData.calibre_1_name || ""}
+                              onChange={(e) => setEditData({ ...editData, calibre_1_name: e.target.value })}
+                              style={{ width: "100%", padding: "4px" }}
+                              placeholder="Calibre"
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
+                            <input
+                              type="number"
+                              value={editData.calibre_1_qty_target || ""}
+                              onChange={(e) => setEditData({ ...editData, calibre_1_qty_target: e.target.value ? parseInt(e.target.value) : null })}
+                              style={{ width: "80px", padding: "4px" }}
+                              placeholder="Qty"
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
+                            <input
+                              type="text"
+                              value={editData.calibre_2_name || ""}
+                              onChange={(e) => setEditData({ ...editData, calibre_2_name: e.target.value })}
+                              style={{ width: "100%", padding: "4px" }}
+                              placeholder="Calibre"
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
+                            <input
+                              type="number"
+                              value={editData.calibre_2_qty_target || ""}
+                              onChange={(e) => setEditData({ ...editData, calibre_2_qty_target: e.target.value ? parseInt(e.target.value) : null })}
+                              style={{ width: "80px", padding: "4px" }}
+                              placeholder="Qty"
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
+                            <input
+                              type="text"
+                              value={editData.calibre_3_name || ""}
+                              onChange={(e) => setEditData({ ...editData, calibre_3_name: e.target.value })}
+                              style={{ width: "100%", padding: "4px" }}
+                              placeholder="Calibre"
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
+                            <input
+                              type="number"
+                              value={editData.calibre_3_qty_target || ""}
+                              onChange={(e) => setEditData({ ...editData, calibre_3_qty_target: e.target.value ? parseInt(e.target.value) : null })}
+                              style={{ width: "80px", padding: "4px" }}
+                              placeholder="Qty"
+                            />
+                          </td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
+                            <button
+                              onClick={() => handleSaveTarget(target.id)}
+                              style={{
+                                padding: "4px 8px",
+                                marginRight: "4px",
+                                backgroundColor: "#4CAF50",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "3px",
+                                cursor: "pointer",
+                                fontSize: "12px",
+                              }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              style={{
+                                padding: "4px 8px",
+                                backgroundColor: "#999",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "3px",
+                                cursor: "pointer",
+                                fontSize: "12px",
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>{target.store_code}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{String(target.target_month).padStart(2, '0')}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.target_year}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>₹{formatIndianNumber(target.value_target)}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_1_name || "-"}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_1_qty_target || "-"}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_2_name || "-"}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_2_qty_target || "-"}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_3_name || "-"}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_3_qty_target || "-"}</td>
+                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
+                            <button
+                              onClick={() => handleEditTarget(target)}
+                              style={{
+                                padding: "4px 8px",
+                                marginRight: "4px",
+                                backgroundColor: "#2196F3",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "3px",
+                                cursor: "pointer",
+                                fontSize: "12px",
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTarget(target.id)}
+                              style={{
+                                padding: "4px 8px",
+                                backgroundColor: "#f44336",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "3px",
+                                cursor: "pointer",
+                                fontSize: "12px",
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!targetsLoading && targets.length === 0 && (
+            <p style={{ textAlign: "center", color: "#999", marginTop: "2rem" }}>
+              No targets found. Upload targets from the Upload Sales & Targets tab.
+            </p>
+          )}
         </div>
       )}
     </div>
