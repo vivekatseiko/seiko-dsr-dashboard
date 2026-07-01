@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import styles from "../styles/Dashboard.module.css";
 
 const formatIndianNumber = (num) => {
@@ -212,7 +212,7 @@ export default function StorePerformance() {
             </thead>
             <tbody>
               {data.map((store) => (
-                <React.Fragment key={store.store_code}>
+                <tbody key={store.store_code}>
                   {/* Main Row */}
                   <tr style={{ borderBottom: "1px solid #ddd" }}>
                     <td style={{ padding: "10px", border: "1px solid #ddd", fontWeight: "bold" }}>
@@ -340,7 +340,7 @@ export default function StorePerformance() {
                       </td>
                     </tr>
                   )}
-                </React.Fragment>
+                </tbody>
               ))}
             </tbody>
           </table>
