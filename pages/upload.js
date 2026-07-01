@@ -29,8 +29,6 @@ export default function Upload() {
   const [filterYear, setFilterYear] = useState("all");
   const [stores, setStores] = useState([]);
   const [years, setYears] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const [editData, setEditData] = useState({});
 
   const VALID_STORE_CODES = [
     "SBTEXACHN", "SBTFALBLR", "SBTSCMKOL", "SBTBRVMUM", "SBTDLFNOI",
@@ -81,55 +79,6 @@ export default function Upload() {
     }
   };
 
-  const handleEditTarget = (target) => {
-    setEditingId(target.id);
-    setEditData({ ...target });
-  };
-
-  const handleSaveTarget = async (id) => {
-    if (!editData.value_target || editData.value_target <= 0) {
-      setMessage("❌ Value target must be greater than 0");
-      setMessageType("error");
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/targets", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id,
-          store_code: editData.store_code,
-          target_month: editData.target_month,
-          target_year: editData.target_year,
-          value_target: editData.value_target,
-          calibre_1_name: editData.calibre_1_name || null,
-          calibre_1_qty_target: editData.calibre_1_qty_target || null,
-          calibre_2_name: editData.calibre_2_name || null,
-          calibre_2_qty_target: editData.calibre_2_qty_target || null,
-          calibre_3_name: editData.calibre_3_name || null,
-          calibre_3_qty_target: editData.calibre_3_qty_target || null,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        setMessage(`❌ Update failed: ${result.error}`);
-        setMessageType("error");
-      } else {
-        setMessage("✅ Target updated successfully");
-        setMessageType("success");
-        setEditingId(null);
-        fetchTargets();
-        setTimeout(() => setMessage(""), 2000);
-      }
-    } catch (err) {
-      setMessage(`❌ Error: ${err.message}`);
-      setMessageType("error");
-    }
-  };
-
   const handleDeleteTarget = async (id) => {
     if (!confirm("Are you sure you want to delete this target?")) return;
 
@@ -153,11 +102,6 @@ export default function Upload() {
       setMessage(`❌ Error: ${err.message}`);
       setMessageType("error");
     }
-  };
-
-  const handleCancelEdit = () => {
-    setEditingId(null);
-    setEditData({});
   };
 
   const isValidStoreCode = (code) => {
@@ -531,12 +475,10 @@ export default function Upload() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (activeTab === "sales") {
-      if (fileType === "sales") {
-        handleSalesFileUpload(file);
-      } else {
-        handleTargetFileUpload(file);
-      }
+    if (fileType === "sales") {
+      handleSalesFileUpload(file);
+    } else {
+      handleTargetFileUpload(file);
     }
   };
 
@@ -747,194 +689,54 @@ export default function Upload() {
                 style={{
                   width: "100%",
                   borderCollapse: "collapse",
-                  fontSize: "12px",
+                  fontSize: "11px",
+                  border: "1px solid #ddd",
                 }}
               >
                 <thead>
                   <tr style={{ backgroundColor: "#f0f0f0" }}>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "left" }}>Store</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Month</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Year</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>Value Target</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Calibre 1</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Qty</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Calibre 2</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Qty</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Calibre 3</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Qty</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Actions</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "left", minWidth: "80px" }}>Store</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "50px" }}>Month</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "50px" }}>Year</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "right", minWidth: "100px" }}>Value Target</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "65px" }}>Cal 1</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "50px" }}>Qty</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "65px" }}>Cal 2</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "50px" }}>Qty</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "65px" }}>Cal 3</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "50px" }}>Qty</th>
+                    <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", minWidth: "75px" }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {targets.map((target) => (
                     <tr key={target.id} style={{ borderBottom: "1px solid #ddd" }}>
-                      {editingId === target.id ? (
-                        <>
-                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
-                            <input
-                              type="text"
-                              value={editData.store_code}
-                              disabled
-                              style={{ width: "100%", padding: "4px" }}
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
-                            <input
-                              type="number"
-                              min="1"
-                              max="12"
-                              value={editData.target_month}
-                              onChange={(e) => setEditData({ ...editData, target_month: parseInt(e.target.value) })}
-                              style={{ width: "60px", padding: "4px" }}
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
-                            <input
-                              type="number"
-                              value={editData.target_year}
-                              onChange={(e) => setEditData({ ...editData, target_year: parseInt(e.target.value) })}
-                              style={{ width: "80px", padding: "4px" }}
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>
-                            <input
-                              type="number"
-                              value={editData.value_target}
-                              onChange={(e) => setEditData({ ...editData, value_target: parseFloat(e.target.value) })}
-                              style={{ width: "100%", padding: "4px" }}
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
-                            <input
-                              type="text"
-                              value={editData.calibre_1_name || ""}
-                              onChange={(e) => setEditData({ ...editData, calibre_1_name: e.target.value })}
-                              style={{ width: "100%", padding: "4px" }}
-                              placeholder="Calibre"
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
-                            <input
-                              type="number"
-                              value={editData.calibre_1_qty_target || ""}
-                              onChange={(e) => setEditData({ ...editData, calibre_1_qty_target: e.target.value ? parseInt(e.target.value) : null })}
-                              style={{ width: "80px", padding: "4px" }}
-                              placeholder="Qty"
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
-                            <input
-                              type="text"
-                              value={editData.calibre_2_name || ""}
-                              onChange={(e) => setEditData({ ...editData, calibre_2_name: e.target.value })}
-                              style={{ width: "100%", padding: "4px" }}
-                              placeholder="Calibre"
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
-                            <input
-                              type="number"
-                              value={editData.calibre_2_qty_target || ""}
-                              onChange={(e) => setEditData({ ...editData, calibre_2_qty_target: e.target.value ? parseInt(e.target.value) : null })}
-                              style={{ width: "80px", padding: "4px" }}
-                              placeholder="Qty"
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
-                            <input
-                              type="text"
-                              value={editData.calibre_3_name || ""}
-                              onChange={(e) => setEditData({ ...editData, calibre_3_name: e.target.value })}
-                              style={{ width: "100%", padding: "4px" }}
-                              placeholder="Calibre"
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>
-                            <input
-                              type="number"
-                              value={editData.calibre_3_qty_target || ""}
-                              onChange={(e) => setEditData({ ...editData, calibre_3_qty_target: e.target.value ? parseInt(e.target.value) : null })}
-                              style={{ width: "80px", padding: "4px" }}
-                              placeholder="Qty"
-                            />
-                          </td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
-                            <button
-                              onClick={() => handleSaveTarget(target.id)}
-                              style={{
-                                padding: "4px 8px",
-                                marginRight: "4px",
-                                backgroundColor: "#4CAF50",
-                                color: "white",
-                                border: "none",
-                                borderRadius: "3px",
-                                cursor: "pointer",
-                                fontSize: "12px",
-                              }}
-                            >
-                              Save
-                            </button>
-                            <button
-                              onClick={handleCancelEdit}
-                              style={{
-                                padding: "4px 8px",
-                                backgroundColor: "#999",
-                                color: "white",
-                                border: "none",
-                                borderRadius: "3px",
-                                cursor: "pointer",
-                                fontSize: "12px",
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td style={{ padding: "10px", border: "1px solid #ddd" }}>{target.store_code}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{String(target.target_month).padStart(2, '0')}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.target_year}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>₹{formatIndianNumber(target.value_target)}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_1_name || "-"}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_1_qty_target || "-"}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_2_name || "-"}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_2_qty_target || "-"}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_3_name || "-"}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_3_qty_target || "-"}</td>
-                          <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
-                            <button
-                              onClick={() => handleEditTarget(target)}
-                              style={{
-                                padding: "4px 8px",
-                                marginRight: "4px",
-                                backgroundColor: "#2196F3",
-                                color: "white",
-                                border: "none",
-                                borderRadius: "3px",
-                                cursor: "pointer",
-                                fontSize: "12px",
-                              }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteTarget(target.id)}
-                              style={{
-                                padding: "4px 8px",
-                                backgroundColor: "#f44336",
-                                color: "white",
-                                border: "none",
-                                borderRadius: "3px",
-                                cursor: "pointer",
-                                fontSize: "12px",
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </>
-                      )}
+                      <td style={{ padding: "8px", border: "1px solid #ddd" }}>{target.store_code}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{String(target.target_month).padStart(2, '0')}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{target.target_year}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "right" }}>₹{formatIndianNumber(target.value_target)}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", fontSize: "10px" }}>{target.calibre_1_name || "-"}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_1_qty_target || "-"}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", fontSize: "10px" }}>{target.calibre_2_name || "-"}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_2_qty_target || "-"}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", fontSize: "10px" }}>{target.calibre_3_name || "-"}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{target.calibre_3_qty_target || "-"}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", whiteSpace: "nowrap" }}>
+                        <button
+                          onClick={() => handleDeleteTarget(target.id)}
+                          style={{
+                            padding: "4px 8px",
+                            backgroundColor: "#f44336",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "3px",
+                            cursor: "pointer",
+                            fontSize: "11px",
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
