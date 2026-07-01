@@ -12,30 +12,20 @@ const formatIndianNumber = (num) => {
 };
 
 const getAchievementColor = (percent) => {
-  if (percent >= 100) return "#4CAF50"; // Green
-  if (percent >= 75) return "#FF9800"; // Orange
-  return "#f44336"; // Red
+  if (percent >= 100) return "#4CAF50";
+  if (percent >= 75) return "#FF9800";
+  return "#f44336";
 };
 
 export default function StorePerformance() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [city, setCity] = useState("all");
-  const [region, setRegion] = useState("all");
-  const [storeCode, setStoreCode] = useState("all");
-
-  const [cities, setCities] = useState([]);
-  const [regions, setRegions] = useState([]);
-  const [stores, setStores] = useState([]);
-
   const [expandedStore, setExpandedStore] = useState(null);
 
   useEffect(() => {
-    // Set default date range to MTD
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     setStartDate(firstDay.toISOString().split("T")[0]);
@@ -44,7 +34,7 @@ export default function StorePerformance() {
 
   useEffect(() => {
     fetchData();
-  }, [startDate, endDate, city, region, storeCode]);
+  }, [startDate, endDate]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -53,9 +43,6 @@ export default function StorePerformance() {
       const params = new URLSearchParams();
       if (startDate) params.append("startDate", startDate);
       if (endDate) params.append("endDate", endDate);
-      if (city !== "all") params.append("city", city);
-      if (region !== "all") params.append("region", region);
-      if (storeCode !== "all") params.append("storeCode", storeCode);
 
       const response = await fetch(`/api/store-performance?${params.toString()}`);
       const result = await response.json();
@@ -65,17 +52,6 @@ export default function StorePerformance() {
         setData([]);
       } else {
         setData(result.data || []);
-
-        // Extract unique cities, regions, stores
-        if (result.data && result.data.length > 0) {
-          const uniqueCities = [...new Set(result.data.map(s => s.city).filter(c => c))].sort();
-          const uniqueRegions = [...new Set(result.data.map(s => s.region).filter(r => r))].sort();
-          const uniqueStores = [...new Set(result.data.map(s => ({ code: s.store_code, name: s.store_name })))].sort((a, b) => a.code.localeCompare(b.code));
-
-          setCities(uniqueCities);
-          setRegions(uniqueRegions);
-          setStores(uniqueStores);
-        }
       }
     } catch (err) {
       setError(err.message);
@@ -90,9 +66,6 @@ export default function StorePerformance() {
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     setStartDate(firstDay.toISOString().split("T")[0]);
     setEndDate(today.toISOString().split("T")[0]);
-    setCity("all");
-    setRegion("all");
-    setStoreCode("all");
   };
 
   return (
@@ -100,257 +73,153 @@ export default function StorePerformance() {
       <h1>🏪 Store-wise Performance</h1>
 
       {/* Filters */}
-      <div
-        style={{
-          backgroundColor: "#f5f5f5",
-          padding: "1.5rem",
-          borderRadius: "8px",
-          marginBottom: "2rem",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "1rem",
-        }}
-      >
+      <div style={{ marginBottom: "2rem", display: "flex", gap: "1rem", alignItems: "flex-end" }}>
         <div>
           <label>Start Date:</label>
           <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         </div>
-
         <div>
           <label>End Date:</label>
           <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
         </div>
-
-        <div>
-          <label>City:</label>
-          <select value={city} onChange={(e) => setCity(e.target.value)}>
-            <option value="all">All Cities</option>
-            {cities.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label>Region:</label>
-          <select value={region} onChange={(e) => setRegion(e.target.value)}>
-            <option value="all">All Regions</option>
-            {regions.map((r) => (
-              <option key={r} value={r}>{r}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label>Store:</label>
-          <select value={storeCode} onChange={(e) => setStoreCode(e.target.value)}>
-            <option value="all">All Stores</option>
-            {stores.map((s) => (
-              <option key={s.code} value={s.code}>{s.name} ({s.code})</option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "flex-end" }}>
-          <button
-            onClick={handleResetFilters}
-            style={{
-              padding: "0.5rem 1rem",
-              backgroundColor: "#666",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
-          >
-            Reset Filters
-          </button>
-        </div>
+        <button
+          onClick={handleResetFilters}
+          style={{
+            padding: "0.5rem 1rem",
+            backgroundColor: "#666",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Reset
+        </button>
       </div>
 
       {/* Error */}
       {error && (
-        <div
-          style={{
-            padding: "1rem",
-            marginBottom: "1rem",
-            borderRadius: "4px",
-            backgroundColor: "#fee2e2",
-            color: "#991b1b",
-            border: "1px solid #fca5a5",
-          }}
-        >
+        <div style={{
+          padding: "1rem",
+          marginBottom: "1rem",
+          borderRadius: "4px",
+          backgroundColor: "#fee2e2",
+          color: "#991b1b",
+          border: "1px solid #fca5a5",
+        }}>
           ❌ {error}
         </div>
       )}
 
       {/* Loading */}
-      {loading && <p>Loading store performance data...</p>}
+      {loading && <p>Loading...</p>}
 
       {/* Table */}
       {!loading && data.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: "12px",
-              border: "1px solid #ddd",
-            }}
-          >
-            <thead>
-              <tr style={{ backgroundColor: "#f0f0f0" }}>
-                <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "left" }}>Store</th>
-                <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>Value Target</th>
-                <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>Value Achieved</th>
-                <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Ach %</th>
-                <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Calibres</th>
-                <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Discount %</th>
-                <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Warranty %</th>
-                <th style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>Expand</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((store) => (
-                <tbody key={store.store_code}>
-                  {/* Main Row */}
-                  <tr style={{ borderBottom: "1px solid #ddd" }}>
-                    <td style={{ padding: "10px", border: "1px solid #ddd", fontWeight: "bold" }}>
-                      {store.store_name}
-                    </td>
-                    <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>
-                      ₹{formatIndianNumber(store.value_target)}
-                    </td>
-                    <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "right" }}>
-                      ₹{(store.value_achieved / 100000).toFixed(2)}L
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px",
+        <div>
+          {data.map((store) => (
+            <div key={store.store_code} style={{ marginBottom: "2rem" }}>
+              {/* Store Header Row */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "2fr 1fr 1fr 1fr 1.5fr 1fr 1fr 0.5fr",
+                gap: "0px",
+                marginBottom: "0px",
+                backgroundColor: "#f0f0f0",
+                fontWeight: "bold",
+                fontSize: "12px",
+              }}>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd" }}>Store</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "right" }}>Value Target</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "right" }}>Value Achieved</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>Ach %</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd" }}>Calibres</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>Discount %</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>Warranty %</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", textAlign: "center" }}>Expand</div>
+              </div>
+
+              {/* Store Data Row */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "2fr 1fr 1fr 1fr 1.5fr 1fr 1fr 0.5fr",
+                gap: "0px",
+                backgroundColor: "#fff",
+                fontSize: "12px",
+              }}>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", fontWeight: "bold" }}>{store.store_name}</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "right" }}>₹{formatIndianNumber(store.value_target)}</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "right" }}>₹{(store.value_achieved / 100000).toFixed(2)}L</div>
+                <div style={{
+                  padding: "10px",
+                  borderBottom: "1px solid #ddd",
+                  borderRight: "1px solid #ddd",
+                  textAlign: "center",
+                  backgroundColor: getAchievementColor(store.value_achievement_percent),
+                  color: "white",
+                  fontWeight: "bold",
+                }}>
+                  {store.value_achievement_percent.toFixed(1)}%
+                </div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd" }}>
+                  {store.calibre_metrics.length > 0 ? store.calibre_metrics.map(c => c.name).join(", ") : "-"}
+                </div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>{store.avg_discount_percent.toFixed(2)}%</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>{store.warranty_percent.toFixed(2)}%</div>
+                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", textAlign: "center" }}>
+                  <button
+                    onClick={() => setExpandedStore(expandedStore === store.store_code ? null : store.store_code)}
+                    style={{
+                      padding: "4px 8px",
+                      backgroundColor: "#2196F3",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      fontSize: "11px",
+                    }}
+                  >
+                    {expandedStore === store.store_code ? "▲" : "▼"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Calibre Breakdown */}
+              {expandedStore === store.store_code && store.calibre_metrics.length > 0 && (
+                <div style={{ backgroundColor: "#f9f9f9", padding: "1rem", borderBottom: "2px solid #ddd" }}>
+                  <p style={{ fontWeight: "bold", marginBottom: "1rem" }}>Calibre Breakdown:</p>
+                  {store.calibre_metrics.map((cal, idx) => (
+                    <div key={idx} style={{
+                      display: "grid",
+                      gridTemplateColumns: "2fr 1fr 1fr 1fr",
+                      gap: "0px",
+                      marginBottom: "0.5rem",
+                      fontSize: "11px",
+                    }}>
+                      <div style={{ padding: "8px", border: "1px solid #ddd" }}>{cal.name}</div>
+                      <div style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{cal.target}</div>
+                      <div style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{cal.achieved}</div>
+                      <div style={{
+                        padding: "8px",
                         border: "1px solid #ddd",
                         textAlign: "center",
-                        backgroundColor: getAchievementColor(store.value_achievement_percent),
+                        backgroundColor: getAchievementColor(cal.achievement_percent),
                         color: "white",
                         fontWeight: "bold",
-                      }}
-                    >
-                      {store.value_achievement_percent.toFixed(1)}%
-                    </td>
-                    <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
-                      {store.calibre_metrics.length > 0 ? (
-                        <span>{store.calibre_metrics.map(c => c.name).join(", ")}</span>
-                      ) : (
-                        <span style={{ color: "#999" }}>-</span>
-                      )}
-                    </td>
-                    <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
-                      {store.avg_discount_percent.toFixed(2)}%
-                    </td>
-                    <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
-                      {store.warranty_percent.toFixed(2)}%
-                    </td>
-                    <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
-                      <button
-                        onClick={() =>
-                          setExpandedStore(expandedStore === store.store_code ? null : store.store_code)
-                        }
-                        style={{
-                          padding: "4px 8px",
-                          backgroundColor: "#2196F3",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "3px",
-                          cursor: "pointer",
-                          fontSize: "11px",
-                        }}
-                      >
-                        {expandedStore === store.store_code ? "▲" : "▼"}
-                      </button>
-                    </td>
-                  </tr>
-
-                  {/* Calibre Breakdown Row */}
-                  {expandedStore === store.store_code && store.calibre_metrics.length > 0 && (
-                    <tr style={{ backgroundColor: "#f9f9f9", borderBottom: "2px solid #ddd" }}>
-                      <td colSpan="8" style={{ padding: "15px", border: "1px solid #ddd" }}>
-                        <div style={{ marginLeft: "20px" }}>
-                          <p style={{ fontWeight: "bold", marginBottom: "10px" }}>Calibre-wise Breakdown:</p>
-                          <table
-                            style={{
-                              width: "100%",
-                              borderCollapse: "collapse",
-                              fontSize: "11px",
-                              backgroundColor: "white",
-                            }}
-                          >
-                            <thead>
-                              <tr style={{ backgroundColor: "#f0f0f0" }}>
-                                <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "left" }}>
-                                  Calibre
-                                </th>
-                                <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>
-                                  Target Qty
-                                </th>
-                                <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>
-                                  Achieved Qty
-                                </th>
-                                <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>
-                                  Achievement %
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {store.calibre_metrics.map((calibre, idx) => (
-                                <tr key={idx} style={{ borderBottom: "1px solid #eee" }}>
-                                  <td style={{ padding: "8px", border: "1px solid #ddd" }}>
-                                    {calibre.name}
-                                  </td>
-                                  <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>
-                                    {calibre.target}
-                                  </td>
-                                  <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>
-                                    {calibre.achieved}
-                                  </td>
-                                  <td
-                                    style={{
-                                      padding: "8px",
-                                      border: "1px solid #ddd",
-                                      textAlign: "center",
-                                      backgroundColor: getAchievementColor(calibre.achievement_percent),
-                                      color: "white",
-                                      fontWeight: "bold",
-                                      borderRadius: "3px",
-                                    }}
-                                  >
-                                    {calibre.achievement_percent.toFixed(1)}%
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-
-                  {expandedStore === store.store_code && store.calibre_metrics.length === 0 && (
-                    <tr style={{ backgroundColor: "#f9f9f9", borderBottom: "2px solid #ddd" }}>
-                      <td colSpan="8" style={{ padding: "15px", border: "1px solid #ddd", color: "#999" }}>
-                        No calibre targets set for this store.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              ))}
-            </tbody>
-          </table>
+                      }}>
+                        {cal.achievement_percent.toFixed(1)}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
       {!loading && data.length === 0 && (
-        <p style={{ textAlign: "center", color: "#999", marginTop: "2rem" }}>
-          No data found for selected filters.
-        </p>
+        <p style={{ textAlign: "center", color: "#999" }}>No data found.</p>
       )}
     </div>
   );
