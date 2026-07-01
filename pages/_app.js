@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import styles from "../styles/Home.module.css";
+import styles from "../styles/App.module.css";
 
 export default function App({ Component, pageProps }) {
   const router = useRouter();
