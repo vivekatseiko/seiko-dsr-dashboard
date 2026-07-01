@@ -73,15 +73,9 @@ export default function App({ Component, pageProps }) {
           </Link>
 
           {userRole === "admin" && (
-            <>
-              <Link href="/targets-management" className={router.pathname === "/targets-management" ? styles.active : ""}>
-                🎯 Targets
-              </Link>
-
-              <Link href="/approvals" className={router.pathname === "/approvals" ? styles.active : ""}>
-                ✅ Approvals
-              </Link>
-            </>
+            <Link href="/approvals" className={router.pathname === "/approvals" ? styles.active : ""}>
+              ✅ Approvals
+            </Link>
           )}
         </div>
 
