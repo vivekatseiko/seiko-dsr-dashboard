@@ -12,9 +12,9 @@ const formatIndianNumber = (num) => {
 };
 
 const getAchievementColor = (percent) => {
-  if (percent >= 100) return "#4CAF50";
-  if (percent >= 75) return "#FF9800";
-  return "#f44336";
+  if (percent >= 100) return "#10b981";
+  if (percent >= 75) return "#f59e0b";
+  return "#ef4444";
 };
 
 export default function StorePerformance() {
@@ -70,113 +70,187 @@ export default function StorePerformance() {
 
   return (
     <div className={styles.container}>
-      <h1>🏪 Store-wise Performance</h1>
+      <h1 style={{ fontSize: "28px", fontWeight: "700", marginBottom: "2rem", color: "#1f2937" }}>
+        🏪 Store-wise Performance
+      </h1>
 
-      {/* Filters */}
-      <div style={{ marginBottom: "2rem", display: "flex", gap: "1rem", alignItems: "flex-end" }}>
-        <div>
-          <label>Start Date:</label>
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+      {/* Filters Section */}
+      <div style={{
+        backgroundColor: "#f3f4f6",
+        padding: "1.5rem",
+        borderRadius: "12px",
+        marginBottom: "2rem",
+        display: "flex",
+        gap: "1rem",
+        alignItems: "flex-end",
+        flexWrap: "wrap",
+      }}>
+        <div style={{ flex: 1, minWidth: "150px" }}>
+          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#374151", marginBottom: "0.5rem" }}>
+            Start Date
+          </label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "0.75rem",
+              border: "1px solid #d1d5db",
+              borderRadius: "6px",
+              fontSize: "13px",
+              fontFamily: "inherit",
+            }}
+          />
         </div>
-        <div>
-          <label>End Date:</label>
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        <div style={{ flex: 1, minWidth: "150px" }}>
+          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#374151", marginBottom: "0.5rem" }}>
+            End Date
+          </label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "0.75rem",
+              border: "1px solid #d1d5db",
+              borderRadius: "6px",
+              fontSize: "13px",
+              fontFamily: "inherit",
+            }}
+          />
         </div>
         <button
           onClick={handleResetFilters}
           style={{
-            padding: "0.5rem 1rem",
-            backgroundColor: "#666",
+            padding: "0.75rem 1.5rem",
+            backgroundColor: "#6366f1",
             color: "white",
             border: "none",
-            borderRadius: "4px",
+            borderRadius: "6px",
             cursor: "pointer",
+            fontSize: "13px",
+            fontWeight: "600",
+            fontFamily: "inherit",
+            transition: "background-color 0.3s",
           }}
+          onMouseOver={(e) => e.target.style.backgroundColor = "#4f46e5"}
+          onMouseOut={(e) => e.target.style.backgroundColor = "#6366f1"}
         >
-          Reset
+          Reset Filters
         </button>
       </div>
 
-      {/* Error */}
+      {/* Error Message */}
       {error && (
         <div style={{
           padding: "1rem",
           marginBottom: "1rem",
-          borderRadius: "4px",
+          borderRadius: "8px",
           backgroundColor: "#fee2e2",
           color: "#991b1b",
           border: "1px solid #fca5a5",
+          fontSize: "13px",
+          fontFamily: "inherit",
         }}>
           ❌ {error}
         </div>
       )}
 
-      {/* Loading */}
-      {loading && <p>Loading...</p>}
+      {/* Loading State */}
+      {loading && (
+        <div style={{ textAlign: "center", padding: "2rem", color: "#6b7280", fontSize: "14px", fontFamily: "inherit" }}>
+          Loading store performance data...
+        </div>
+      )}
 
-      {/* Table */}
+      {/* Data Table */}
       {!loading && data.length > 0 && (
-        <div>
-          {data.map((store) => (
-            <div key={store.store_code} style={{ marginBottom: "2rem" }}>
-              {/* Store Header Row */}
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "2fr 1fr 1fr 1fr 1.5fr 1fr 1fr 0.5fr",
-                gap: "0px",
-                marginBottom: "0px",
-                backgroundColor: "#f0f0f0",
-                fontWeight: "bold",
-                fontSize: "12px",
-              }}>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd" }}>Store</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "right" }}>Value Target</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "right" }}>Value Achieved</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>Ach %</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd" }}>Calibres</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>Discount %</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>Warranty %</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", textAlign: "center" }}>Expand</div>
-              </div>
+        <div style={{ overflowX: "auto" }}>
+          {/* Header Row - Once at Top */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "2fr 1.2fr 1.2fr 0.9fr 1.5fr 1fr 1fr 0.6fr",
+            gap: "0px",
+            backgroundColor: "#1f2937",
+            color: "white",
+            fontWeight: "600",
+            fontSize: "12px",
+            textTransform: "uppercase",
+            letterSpacing: "0.5px",
+            fontFamily: "inherit",
+          }}>
+            <div style={{ padding: "1rem" }}>Store Name</div>
+            <div style={{ padding: "1rem", textAlign: "right" }}>Value Target</div>
+            <div style={{ padding: "1rem", textAlign: "right" }}>Value Achieved</div>
+            <div style={{ padding: "1rem", textAlign: "center" }}>Ach %</div>
+            <div style={{ padding: "1rem" }}>Calibres</div>
+            <div style={{ padding: "1rem", textAlign: "center" }}>Disc %</div>
+            <div style={{ padding: "1rem", textAlign: "center" }}>Warranty %</div>
+            <div style={{ padding: "1rem", textAlign: "center" }}>Details</div>
+          </div>
 
-              {/* Store Data Row */}
+          {/* Store Rows */}
+          {data.map((store, idx) => (
+            <div key={store.store_code}>
+              {/* Main Row */}
               <div style={{
                 display: "grid",
-                gridTemplateColumns: "2fr 1fr 1fr 1fr 1.5fr 1fr 1fr 0.5fr",
+                gridTemplateColumns: "2fr 1.2fr 1.2fr 0.9fr 1.5fr 1fr 1fr 0.6fr",
                 gap: "0px",
-                backgroundColor: "#fff",
-                fontSize: "12px",
-              }}>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", fontWeight: "bold" }}>{store.store_name}</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "right" }}>₹{formatIndianNumber(store.value_target)}</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "right" }}>₹{(store.value_achieved / 100000).toFixed(2)}L</div>
+                backgroundColor: idx % 2 === 0 ? "#fff" : "#f9fafb",
+                fontSize: "13px",
+                fontFamily: "inherit",
+                borderBottom: "1px solid #e5e7eb",
+                transition: "background-color 0.2s",
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#f3f4f6"}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#fff" : "#f9fafb"}
+              >
+                <div style={{ padding: "1rem", fontWeight: "600", color: "#111827" }}>{store.store_name}</div>
+                <div style={{ padding: "1rem", textAlign: "right", color: "#374151" }}>₹{formatIndianNumber(store.value_target)}</div>
+                <div style={{ padding: "1rem", textAlign: "right", color: "#374151" }}>₹{(store.value_achieved / 100000).toFixed(2)}L</div>
                 <div style={{
-                  padding: "10px",
-                  borderBottom: "1px solid #ddd",
-                  borderRight: "1px solid #ddd",
+                  padding: "1rem",
                   textAlign: "center",
                   backgroundColor: getAchievementColor(store.value_achievement_percent),
                   color: "white",
-                  fontWeight: "bold",
+                  fontWeight: "700",
+                  borderRadius: "6px",
+                  margin: "0.25rem",
                 }}>
                   {store.value_achievement_percent.toFixed(1)}%
                 </div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd" }}>
-                  {store.calibre_metrics.length > 0 ? store.calibre_metrics.map(c => c.name).join(", ") : "-"}
+                <div style={{ padding: "1rem", color: "#374151", fontSize: "12px" }}>
+                  {store.calibre_metrics.length > 0 ? store.calibre_metrics.map(c => c.name).join(", ") : "—"}
                 </div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>{store.avg_discount_percent.toFixed(2)}%</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", borderRight: "1px solid #ddd", textAlign: "center" }}>{store.warranty_percent.toFixed(2)}%</div>
-                <div style={{ padding: "10px", borderBottom: "1px solid #ddd", textAlign: "center" }}>
+                <div style={{ padding: "1rem", textAlign: "center", color: "#374151" }}>{store.avg_discount_percent.toFixed(2)}%</div>
+                <div style={{ padding: "1rem", textAlign: "center", color: "#374151" }}>{store.warranty_percent.toFixed(2)}%</div>
+                <div style={{ padding: "1rem", textAlign: "center" }}>
                   <button
                     onClick={() => setExpandedStore(expandedStore === store.store_code ? null : store.store_code)}
                     style={{
-                      padding: "4px 8px",
-                      backgroundColor: "#2196F3",
-                      color: "white",
+                      padding: "0.5rem 0.75rem",
+                      backgroundColor: expandedStore === store.store_code ? "#3b82f6" : "#e5e7eb",
+                      color: expandedStore === store.store_code ? "white" : "#374151",
                       border: "none",
-                      borderRadius: "3px",
+                      borderRadius: "4px",
                       cursor: "pointer",
                       fontSize: "11px",
+                      fontWeight: "600",
+                      fontFamily: "inherit",
+                      transition: "all 0.2s",
+                    }}
+                    onMouseOver={(e) => {
+                      if (expandedStore !== store.store_code) {
+                        e.target.style.backgroundColor = "#d1d5db";
+                      }
+                    }}
+                    onMouseOut={(e) => {
+                      if (expandedStore !== store.store_code) {
+                        e.target.style.backgroundColor = "#e5e7eb";
+                      }
                     }}
                   >
                     {expandedStore === store.store_code ? "▲" : "▼"}
@@ -184,33 +258,48 @@ export default function StorePerformance() {
                 </div>
               </div>
 
-              {/* Calibre Breakdown */}
+              {/* Calibre Breakdown - Expandable */}
               {expandedStore === store.store_code && store.calibre_metrics.length > 0 && (
-                <div style={{ backgroundColor: "#f9f9f9", padding: "1rem", borderBottom: "2px solid #ddd" }}>
-                  <p style={{ fontWeight: "bold", marginBottom: "1rem" }}>Calibre Breakdown:</p>
-                  {store.calibre_metrics.map((cal, idx) => (
-                    <div key={idx} style={{
-                      display: "grid",
-                      gridTemplateColumns: "2fr 1fr 1fr 1fr",
-                      gap: "0px",
-                      marginBottom: "0.5rem",
-                      fontSize: "11px",
-                    }}>
-                      <div style={{ padding: "8px", border: "1px solid #ddd" }}>{cal.name}</div>
-                      <div style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{cal.target}</div>
-                      <div style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{cal.achieved}</div>
-                      <div style={{
-                        padding: "8px",
-                        border: "1px solid #ddd",
-                        textAlign: "center",
-                        backgroundColor: getAchievementColor(cal.achievement_percent),
-                        color: "white",
-                        fontWeight: "bold",
+                <div style={{
+                  backgroundColor: "#f0f9ff",
+                  padding: "1.5rem",
+                  borderBottom: "2px solid #e5e7eb",
+                  fontFamily: "inherit",
+                }}>
+                  <p style={{ fontWeight: "600", marginBottom: "1rem", color: "#1f2937", fontSize: "13px" }}>
+                    Calibre-wise Breakdown
+                  </p>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "1rem" }}>
+                    {store.calibre_metrics.map((cal, cidx) => (
+                      <div key={cidx} style={{
+                        backgroundColor: "white",
+                        padding: "1rem",
+                        borderRadius: "8px",
+                        border: "1px solid #dbeafe",
                       }}>
-                        {cal.achievement_percent.toFixed(1)}%
+                        <p style={{ fontSize: "12px", fontWeight: "600", color: "#374151", marginBottom: "0.5rem" }}>
+                          {cal.name}
+                        </p>
+                        <div style={{ fontSize: "11px", color: "#6b7280", marginBottom: "0.25rem" }}>
+                          Target: <span style={{ fontWeight: "600", color: "#111827" }}>{cal.target}</span>
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#6b7280", marginBottom: "0.5rem" }}>
+                          Achieved: <span style={{ fontWeight: "600", color: "#111827" }}>{cal.achieved}</span>
+                        </div>
+                        <div style={{
+                          fontSize: "12px",
+                          fontWeight: "700",
+                          color: "white",
+                          backgroundColor: getAchievementColor(cal.achievement_percent),
+                          padding: "0.5rem",
+                          borderRadius: "4px",
+                          textAlign: "center",
+                        }}>
+                          {cal.achievement_percent.toFixed(1)}%
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -219,7 +308,15 @@ export default function StorePerformance() {
       )}
 
       {!loading && data.length === 0 && (
-        <p style={{ textAlign: "center", color: "#999" }}>No data found.</p>
+        <div style={{
+          textAlign: "center",
+          padding: "2rem",
+          color: "#9ca3af",
+          fontSize: "14px",
+          fontFamily: "inherit",
+        }}>
+          No data found for selected dates.
+        </div>
       )}
     </div>
   );
