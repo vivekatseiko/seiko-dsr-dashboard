@@ -70,7 +70,7 @@ export default function StorePerformance() {
 
       {/* Compact Filter Section */}
       <div style={{
-        backgroundColor: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
         padding: "1rem 1.5rem",
         borderRadius: "12px",
         marginBottom: "2rem",
@@ -90,12 +90,12 @@ export default function StorePerformance() {
             onChange={(e) => setStartDate(e.target.value)}
             style={{
               padding: "0.5rem 0.75rem",
-              border: "1px solid rgba(255,255,255,0.3)",
+              border: "1px solid #ddd",
               borderRadius: "6px",
               fontSize: "12px",
               fontFamily: "inherit",
-              backgroundColor: "rgba(255,255,255,0.1)",
-              color: "white",
+              backgroundColor: "white",
+              color: "#1f2937",
               width: "140px",
             }}
           />
@@ -111,12 +111,12 @@ export default function StorePerformance() {
             onChange={(e) => setEndDate(e.target.value)}
             style={{
               padding: "0.5rem 0.75rem",
-              border: "1px solid rgba(255,255,255,0.3)",
+              border: "1px solid #ddd",
               borderRadius: "6px",
               fontSize: "12px",
               fontFamily: "inherit",
-              backgroundColor: "rgba(255,255,255,0.1)",
-              color: "white",
+              backgroundColor: "white",
+              color: "#1f2937",
               width: "140px",
             }}
           />
