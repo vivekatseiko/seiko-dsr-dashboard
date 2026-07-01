@@ -6,29 +6,13 @@ export default function Upload() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
+  const [fileType, setFileType] = useState("sales");
 
-  // Master list of valid store codes
   const VALID_STORE_CODES = [
-    "SBTEXACHN",
-    "SBTFALBLR",
-    "SBTSCMKOL",
-    "SBTBRVMUM",
-    "SBTDLFNOI",
-    "SBTPMCCHN",
-    "SBTSKYMUM",
-    "SBTBLRMUM",
-    "SBTMKSBLR",
-    "SWSPMCCHN",
-    "SWSMOABLR",
-    "SWSPHCIND",
-    "SWSNEMCGH",
-    "SWSPMCMUM",
-    "SWSPMMPNE",
-    "SWSSCMHYD",
-    "SWSLULKOC",
-    "SWSCAMKOL",
-    "SWSUNMDEL",
-    "SWSPHPLUK",
+    "SBTEXACHN", "SBTFALBLR", "SBTSCMKOL", "SBTBRVMUM", "SBTDLFNOI",
+    "SBTPMCCHN", "SBTSKYMUM", "SBTBLRMUM", "SBTMKSBLR", "SWSPMCCHN",
+    "SWSMOABLR", "SWSPHCIND", "SWSNEMCGH", "SWSPMCMUM", "SWSPMMPNE",
+    "SWSSCMHYD", "SWSLULKOC", "SWSCAMKOL", "SWSUNMDEL", "SWSPHPLUK",
     "SBTPMCPNE",
   ];
 
@@ -41,31 +25,11 @@ export default function Upload() {
   const isDateColumn = (columnName) => {
     if (!columnName) return false;
     const name = columnName.toString().toLowerCase();
-    return (
-      name.includes("date") ||
-      name.includes("transaction date") ||
-      name.includes("invoice date")
-    );
-  };
-
-  const isHeaderValue = (value) => {
-    if (!value) return false;
-    const str = value.toString().toLowerCase().trim();
-    return (
-      str === "date" ||
-      str === "transaction date" ||
-      str === "invoice date" ||
-      str === "system invoice number" ||
-      str === "model number" ||
-      str === "qty" ||
-      str === "quantity"
-    );
+    return name.includes("date") || name.includes("transaction date") || name.includes("invoice date");
   };
 
   const parseDate = (dateValue) => {
     if (!dateValue) return "";
-
-    // Handle dd-mm-yyyy format
     if (typeof dateValue === "string") {
       const ddmmyyyy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.test(dateValue);
       if (ddmmyyyy) {
@@ -75,20 +39,138 @@ export default function Upload() {
       }
       return dateValue;
     }
-
-    // Handle Excel serial date
     if (typeof dateValue === "number") {
       const date = new Date((dateValue - 25569) * 86400 * 1000);
       return date.toISOString().split("T")[0];
     }
-
     return "";
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleTargetFileUpload = async (file) => {
+    setLoading(true);
+    setMessage("Reading target file...");
+    setMessageType("info");
 
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          setMessage("Loading Excel library...");
+
+          const script = document.createElement("script");
+          script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
+          
+          script.onerror = () => {
+            setMessage("❌ Failed to load Excel library.");
+            setMessageType("error");
+            setLoading(false);
+          };
+
+          script.onload = async () => {
+            try {
+              const XLSX = window.XLSX;
+              const workbook = XLSX.read(event.target.result, { type: "array" });
+              const sheet = workbook.Sheets[workbook.SheetNames[0]];
+              const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+              setMessage("Parsing target data...");
+
+              let targetRecords = [];
+              let processedRows = 0;
+
+              // Start from row 1 (skip header at row 0)
+              for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length < 4) continue;
+
+                const storeCode = row[0]?.toString().toUpperCase().trim();
+                const month = parseInt(row[1]);
+                const year = parseInt(row[2]);
+                const valueTarget = parseFloat(row[3]);
+
+                if (!isValidStoreCode(storeCode) || !month || !year || !valueTarget) {
+                  console.log(`⚠️ Skipping row ${i + 1}: Invalid data`);
+                  continue;
+                }
+
+                const record = {
+                  store_code: storeCode,
+                  target_month: month,
+                  target_year: year,
+                  value_target: valueTarget,
+                  calibre_1_name: row[5] || null,
+                  calibre_1_qty_target: row[6] ? parseInt(row[6]) : null,
+                  calibre_2_name: row[7] || null,
+                  calibre_2_qty_target: row[8] ? parseInt(row[8]) : null,
+                  calibre_3_name: row[9] || null,
+                  calibre_3_qty_target: row[10] ? parseInt(row[10]) : null,
+                };
+
+                targetRecords.push(record);
+                processedRows++;
+              }
+
+              if (targetRecords.length === 0) {
+                setMessage("❌ No valid target data found in file.");
+                setMessageType("error");
+                setLoading(false);
+                return;
+              }
+
+              setMessage(`Found ${targetRecords.length} target records. Uploading...`);
+
+              const userEmail = localStorage.getItem("userEmail") || "unknown";
+
+              const response = await fetch("/api/targets-upload", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  records: targetRecords,
+                  uploadedBy: userEmail,
+                }),
+              });
+
+              const result = await response.json();
+
+              if (!response.ok) {
+                setMessage(`❌ Upload Failed: ${result.error}`);
+                setMessageType("error");
+                setLoading(false);
+                return;
+              }
+
+              setMessage(
+                `✅ Success! Uploaded ${result.recordsInserted} target records`
+              );
+              setMessageType("success");
+              setTimeout(() => router.push("/targets-management"), 2000);
+            } catch (err) {
+              console.error("Error:", err);
+              setMessage(`❌ Error: ${err.message}`);
+              setMessageType("error");
+              setLoading(false);
+            }
+          };
+
+          document.head.appendChild(script);
+        } catch (err) {
+          console.error("Error:", err);
+          setMessage(`❌ Error: ${err.message}`);
+          setMessageType("error");
+          setLoading(false);
+        }
+      };
+
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      console.error("Error:", err);
+      setMessage(`❌ Error: ${err.message}`);
+      setMessageType("error");
+      setLoading(false);
+    }
+  };
+
+  const handleSalesFileUpload = async (file) => {
     setLoading(true);
     setMessage("Reading Excel file...");
     setMessageType("info");
@@ -123,7 +205,6 @@ export default function Upload() {
                 try {
                   const sheet = workbook.Sheets[sheetName];
                   
-                  // Check store code in B3
                   const storeCodeCell = sheet["B3"];
                   const sheetStoreCode = storeCodeCell?.v;
 
@@ -147,7 +228,6 @@ export default function Upload() {
                     continue;
                   }
 
-                  // Find header row - look up to row 30 for flexibility
                   let headerRowIndex = -1;
                   let dateColumnIndex = -1;
 
@@ -155,7 +235,6 @@ export default function Upload() {
                     const row = rows[i];
                     if (!row || row.length === 0) continue;
 
-                    // Check if this row contains a date column
                     for (let j = 0; j < row.length; j++) {
                       if (isDateColumn(row[j])) {
                         headerRowIndex = i;
@@ -181,8 +260,7 @@ export default function Upload() {
                     continue;
                   }
 
-                  // Remove header row if it was accidentally included
-                  if (isHeaderValue(dataRows[0][dateColumnIndex])) {
+                  if (isDateColumn(dataRows[0][dateColumnIndex])) {
                     console.log(`Removing duplicate header row from data`);
                     dataRows = dataRows.slice(1);
                   }
@@ -193,7 +271,6 @@ export default function Upload() {
                     continue;
                   }
 
-                  // Validate first data row has valid date
                   const firstDataValue = dataRows[0][dateColumnIndex];
                   const parsedDate = parseDate(firstDataValue);
 
@@ -253,8 +330,6 @@ export default function Upload() {
               setMessage(`Found ${allRecords.length} records from ${processedSheets} sheet(s). Uploading... (Skipped: ${skippedSheets})`);
 
               const userEmail = localStorage.getItem("userEmail") || "unknown";
-              
-              // Get the store code from the first record
               const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
 
               const response = await fetch("/api/upload", {
@@ -307,11 +382,59 @@ export default function Upload() {
     }
   };
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (fileType === "sales") {
+      handleSalesFileUpload(file);
+    } else {
+      handleTargetFileUpload(file);
+    }
+  };
+
   return (
     <div style={{ padding: "2rem", maxWidth: "600px", margin: "0 auto" }}>
-      <h1>📤 Upload Sales Data</h1>
-      <p>Upload Excel file with multiple month sheets</p>
+      <h1>📤 Upload Files</h1>
 
+      {/* File Type Selector */}
+      <div style={{ marginBottom: "1.5rem" }}>
+        <label style={{ fontWeight: "bold", marginBottom: "0.5rem", display: "block" }}>
+          Select File Type:
+        </label>
+        <select 
+          value={fileType} 
+          onChange={(e) => setFileType(e.target.value)}
+          style={{
+            padding: "0.75rem",
+            borderRadius: "4px",
+            border: "1px solid #ccc",
+            fontSize: "14px",
+            width: "100%",
+          }}
+        >
+          <option value="sales">Sales Data File</option>
+          <option value="target">Sales Target File</option>
+        </select>
+      </div>
+
+      {/* Instructions */}
+      <div style={{
+        backgroundColor: "#e3f2fd",
+        padding: "1rem",
+        borderRadius: "4px",
+        marginBottom: "1.5rem",
+        fontSize: "13px",
+        color: "#1565c0",
+      }}>
+        {fileType === "sales" ? (
+          <p>📊 <strong>Sales Data File:</strong> Upload Excel file with monthly sheets containing sales transactions (Date, Invoice #, Model, etc.)</p>
+        ) : (
+          <p>🎯 <strong>Sales Target File:</strong> Upload CSV/Excel with columns: Store code, Month, Year, Value target, Calibre 1, Calibre 1 target, Calibre 2, Calibre 2 target, Calibre 3, Calibre 3 target</p>
+        )}
+      </div>
+
+      {/* File Upload */}
       <div
         style={{
           border: "2px dashed #ccc",
@@ -323,12 +446,13 @@ export default function Upload() {
       >
         <input
           type="file"
-          accept=".xlsx,.xls"
+          accept={fileType === "sales" ? ".xlsx,.xls" : ".csv,.xlsx,.xls"}
           onChange={handleFileUpload}
           disabled={loading}
         />
       </div>
 
+      {/* Message */}
       {message && (
         <div
           style={{
