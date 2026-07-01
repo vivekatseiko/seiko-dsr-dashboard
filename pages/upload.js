@@ -168,14 +168,14 @@ export default function Upload() {
 
               for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
-                if (!row || row.length < 4) continue;
+                if (!row || row.length < 7) continue;
 
                 const storeCode = row[0]?.toString().toUpperCase().trim();
-                const month = parseInt(row[1]);
-                const year = parseInt(row[2]);
-                const valueTarget = parseFloat(row[3]);
+                const month = parseInt(row[2]);
+                const year = parseInt(row[3]);
+                const valueTarget = parseFloat(row[4]);
 
-                if (!isValidStoreCode(storeCode) || !month || !year || !valueTarget) {
+                if (!isValidStoreCode(storeCode) || !month || !year || !valueTarget || month < 1 || month > 12) {
                   console.log(`⚠️ Skipping row ${i + 1}: Invalid data`);
                   continue;
                 }
@@ -593,7 +593,7 @@ export default function Upload() {
             {fileType === "sales" ? (
               <p>📊 <strong>Sales Data File:</strong> Upload Excel file with monthly sheets containing sales transactions (Date, Invoice #, Model, etc.)</p>
             ) : (
-              <p>🎯 <strong>Sales Target File:</strong> Upload CSV/Excel with columns: Store code, Month, Year, Value target, Calibre 1, Calibre 1 target, Calibre 2, Calibre 2 target, Calibre 3, Calibre 3 target</p>
+              <p>🎯 <strong>Sales Target File:</strong> Upload CSV/Excel with columns: Store Code | Store Name | Month (1-12) | Year | Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty</p>
             )}
           </div>
 
