@@ -373,12 +373,12 @@ export default function Upload() {
                   console.log(`Processing sheet "${sheetName}" (store: ${sheetStoreCode}) with ${dataRows.length} rows`);
 
                   for (const row of dataRows) {
-                    const transactionDate = parseDate(row[dateColumnIndex]);
+  const transactionDate = parseDate(row[dateColumnIndex]);
+  const quantity = parseInt(row[3] || 0);
 
-                    if (!transactionDate) continue;
+  if (!transactionDate || !quantity || quantity <= 0) continue;
 
-                    const mrp = parseFloat(row[5] || 0);
-                    const netValue = parseFloat(row[6] || 0);
+  const mrp = parseFloat(row[5] || 0);
 
                     const discountValue = mrp - netValue;
                     const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
