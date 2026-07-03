@@ -36,6 +36,7 @@ export default function Upload() {
     "SWSMOABLR", "SWSPHCIND", "SWSNEMCGH", "SWSPMCMUM", "SWSPMMPNE",
     "SWSSCMHYD", "SWSLULKOC", "SWSCAMKOL", "SWSUNMDEL", "SWSPHPLUK",
     "SBTPMCPNE",
+    "GSSEXACHN", "GSSMOABLR", "GSSPPMMUM", "GSSSLCDEL", "GSSSUBCBLR",
   ];
 
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -373,12 +374,13 @@ export default function Upload() {
                   console.log(`Processing sheet "${sheetName}" (store: ${sheetStoreCode}) with ${dataRows.length} rows`);
 
                   for (const row of dataRows) {
-  const transactionDate = parseDate(row[dateColumnIndex]);
-  const quantity = parseInt(row[3] || 0);
+                    const transactionDate = parseDate(row[dateColumnIndex]);
+                    const quantity = parseInt(row[3] || 0);
 
-  if (!transactionDate || !quantity || quantity <= 0) continue;
+                    if (!transactionDate || !quantity || quantity <= 0) continue;
 
-  const mrp = parseFloat(row[5] || 0);
+                    const mrp = parseFloat(row[5] || 0);
+                    const netValue = parseFloat(row[6] || 0);
 
                     const discountValue = mrp - netValue;
                     const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
@@ -388,15 +390,15 @@ export default function Upload() {
                       transaction_date: transactionDate,
                       system_invoice_number: row[1] || "",
                       model_number: row[2] || "",
-                      quantity: parseInt(row[3] || 0),
+                      quantity: quantity,
                       serial_number: row[4] || "",
                       mrp: mrp,
                       net_value: netValue,
                       discount_value: parseFloat(discountValue.toFixed(2)),
                       discount_percentage: parseFloat(discountPercentage.toFixed(2)),
                       sold_by: row[9] || "",
-                      family: row[10] || "",
-                      calibre: row[11] || "",
+                      family: row[11] || "",
+                      calibre: row[12] || "",
                       customer_name: row[16] || "",
                       mobile_number: row[17] || "",
                     };
