@@ -165,7 +165,6 @@ export default function Upload() {
               setMessage("Parsing target data...");
 
               let targetRecords = [];
-              let processedRows = 0;
 
               for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -181,7 +180,7 @@ export default function Upload() {
                   continue;
                 }
 
-                const record = {
+                targetRecords.push({
                   store_code: storeCode,
                   target_month: month,
                   target_year: year,
@@ -192,10 +191,7 @@ export default function Upload() {
                   calibre_2_qty_target: row[8] ? parseInt(row[8]) : null,
                   calibre_3_name: row[9] || null,
                   calibre_3_qty_target: row[10] ? parseInt(row[10]) : null,
-                };
-
-                targetRecords.push(record);
-                processedRows++;
+                });
               }
 
               if (targetRecords.length === 0) {
@@ -290,6 +286,7 @@ export default function Upload() {
               let allRecords = [];
               let processedSheets = 0;
               let skippedSheets = 0;
+              let rejectedRows = [];
 
               for (const sheetName of workbook.SheetNames) {
                 try {
@@ -313,7 +310,6 @@ export default function Upload() {
                   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
                   if (!rows || rows.length === 0) {
-                    console.log(`Skipping sheet "${sheetName}" - no rows`);
                     skippedSheets++;
                     continue;
                   }
@@ -345,27 +341,23 @@ export default function Upload() {
                   let dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[dateColumnIndex]);
 
                   if (dataRows.length === 0) {
-                    console.log(`Skipping sheet "${sheetName}" - no data rows after headers`);
                     skippedSheets++;
                     continue;
                   }
 
                   if (isDateColumn(dataRows[0][dateColumnIndex])) {
-                    console.log(`Removing duplicate header row from data`);
                     dataRows = dataRows.slice(1);
                   }
 
                   if (dataRows.length === 0) {
-                    console.log(`Skipping sheet "${sheetName}" - no data rows after removing headers`);
                     skippedSheets++;
                     continue;
                   }
 
-                  const firstDataValue = dataRows[0][dateColumnIndex];
-                  const parsedDate = parseDate(firstDataValue);
+                  const parsedDate = parseDate(dataRows[0][dateColumnIndex]);
 
                   if (!parsedDate) {
-                    console.log(`Skipping sheet "${sheetName}" - invalid date format: ${firstDataValue}`);
+                    console.log(`Skipping sheet "${sheetName}" - invalid date format`);
                     skippedSheets++;
                     continue;
                   }
@@ -379,16 +371,28 @@ export default function Upload() {
 
                     if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
 
+                    const invoiceNumber = (row[1] || "").toString().trim();
+                    if (!invoiceNumber) {
+                      rejectedRows.push({
+                        sheet: sheetName,
+                        date: transactionDate,
+                        model: row[2] || "",
+                        serial: row[4] || "",
+                        reason: "Missing invoice number",
+                      });
+                      continue;
+                    }
+
                     const mrp = parseFloat(row[5] || 0);
                     const netValue = parseFloat(row[6] || 0);
 
                     const discountValue = mrp - netValue;
                     const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
 
-                    const record = {
+                    allRecords.push({
                       store_code: sheetStoreCode.toString().toUpperCase(),
                       transaction_date: transactionDate,
-                      system_invoice_number: row[1] || "",
+                      system_invoice_number: invoiceNumber,
                       model_number: row[2] || "",
                       quantity: quantity,
                       serial_number: row[4] || "",
@@ -401,14 +405,30 @@ export default function Upload() {
                       calibre: row[12] || "",
                       customer_name: row[16] || "",
                       mobile_number: row[17] || "",
-                    };
-
-                    allRecords.push(record);
+                    });
                   }
                 } catch (err) {
                   console.error(`Error processing sheet ${sheetName}:`, err);
                   skippedSheets++;
                 }
+              }
+
+              // Reject the whole upload if any row is missing an invoice number
+              if (rejectedRows.length > 0) {
+                console.warn("Rejected rows (missing invoice number):", rejectedRows);
+                const detail = rejectedRows
+                  .slice(0, 8)
+                  .map((r) => `${r.sheet} • ${r.date} • ${r.model} • ${r.serial}`)
+                  .join("\n");
+                let msg = `❌ ${rejectedRows.length} row(s) REJECTED — missing invoice number:\n\n${detail}`;
+                if (rejectedRows.length > 8) {
+                  msg += `\n...and ${rejectedRows.length - 8} more (see browser console)`;
+                }
+                msg += `\n\nInvoice number is mandatory. Fix these rows in the source file and re-upload.`;
+                setMessage(msg);
+                setMessageType("error");
+                setLoading(false);
+                return;
               }
 
               if (allRecords.length === 0) {
@@ -418,7 +438,7 @@ export default function Upload() {
                 return;
               }
 
-              setMessage(`Found ${allRecords.length} records from ${processedSheets} sheet(s). Uploading... (Skipped: ${skippedSheets})`);
+              setMessage(`Found ${allRecords.length} records from ${processedSheets} sheet(s). Uploading...`);
 
               const userEmail = localStorage.getItem("userEmail") || "unknown";
               const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
@@ -442,11 +462,18 @@ export default function Upload() {
                 return;
               }
 
-              setMessage(
-                `✅ Success! Uploaded ${result.recordsInserted} records from ${processedSheets} sheets (${skippedSheets} skipped)`
-              );
+              let summary = `✅ Uploaded ${result.recordsInserted} new record(s) from ${processedSheets} sheet(s).`;
+              if (result.duplicatesSkipped > 0) {
+                summary += ` ${result.duplicatesSkipped} duplicate(s) skipped.`;
+              }
+              if (result.discrepanciesFlagged > 0) {
+                summary += ` ${result.discrepanciesFlagged} flagged for approval.`;
+              }
+
+              setMessage(summary);
               setMessageType("success");
-              setTimeout(() => router.push("/dashboard"), 2000);
+              setLoading(false);
+              setTimeout(() => router.push("/dashboard"), 3000);
             } catch (err) {
               console.error("Error:", err);
               setMessage(`❌ Error: ${err.message}`);
@@ -532,6 +559,7 @@ export default function Upload() {
             padding: "1rem",
             marginBottom: "1rem",
             borderRadius: "4px",
+            whiteSpace: "pre-wrap",
             backgroundColor:
               messageType === "success"
                 ? "#dcfce7"
@@ -559,7 +587,6 @@ export default function Upload() {
       {/* TAB 1: Upload Sales & Targets */}
       {activeTab === "sales" && (
         <div>
-          {/* File Type Selector */}
           <div style={{ marginBottom: "1.5rem" }}>
             <label style={{ fontWeight: "bold", marginBottom: "0.5rem", display: "block" }}>
               Select File Type:
@@ -581,7 +608,6 @@ export default function Upload() {
             </select>
           </div>
 
-          {/* Instructions */}
           <div
             style={{
               backgroundColor: "#e3f2fd",
@@ -593,13 +619,12 @@ export default function Upload() {
             }}
           >
             {fileType === "sales" ? (
-              <p>📊 <strong>Sales Data File:</strong> Upload Excel file with monthly sheets containing sales transactions (Date, Invoice #, Model, etc.)</p>
+              <p>📊 <strong>Sales Data File:</strong> Excel file with monthly sheets. Invoice number is mandatory on every row — rows without one will be rejected.</p>
             ) : (
-              <p>🎯 <strong>Sales Target File:</strong> Upload CSV/Excel with columns: Store Code | Store Name | Month (1-12) | Year | Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty</p>
+              <p>🎯 <strong>Sales Target File:</strong> Store Code | Store Name | Month (1-12) | Year | Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty</p>
             )}
           </div>
 
-          {/* File Upload */}
           <div
             style={{
               border: "2px dashed #ccc",
@@ -622,7 +647,6 @@ export default function Upload() {
       {/* TAB 2: Manage Targets */}
       {activeTab === "targets" && (
         <div>
-          {/* Filters */}
           <div
             style={{
               backgroundColor: "#f5f5f5",
@@ -665,7 +689,6 @@ export default function Upload() {
             </div>
           </div>
 
-          {/* Error */}
           {targetsError && (
             <div
               style={{
@@ -681,10 +704,8 @@ export default function Upload() {
             </div>
           )}
 
-          {/* Loading */}
           {targetsLoading && <p>Loading targets...</p>}
 
-          {/* Table */}
           {!targetsLoading && targets.length > 0 && (
             <div style={{ overflowX: "auto" }}>
               <table
