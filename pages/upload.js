@@ -348,6 +348,18 @@ export default function Upload() {
 
                   if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
 
+                  // One row per physical unit: each row has one serial number
+                  if (Math.abs(quantity) !== 1) {
+                    rejectedRows.push({
+                      sheet: sheetName,
+                      date: transactionDate,
+                      model: row[2] || "",
+                      serial: row[4] || "",
+                      reason: `Qty is ${quantity} — each unit must be its own row with its own serial number (qty 1, or -1 for a return)`,
+                    });
+                    continue;
+                  }
+
                   // Invoice number is mandatory
                   const invoiceNumber = (row[1] || "").toString().trim();
                   if (!invoiceNumber) {
@@ -364,7 +376,7 @@ export default function Upload() {
                   const mrp = parseFloat(row[5] || 0);
                   const netValue = parseFloat(row[6] || 0);
                   const discountValue = mrp - netValue;
-                  const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
+                  const discountPercentage = mrp !== 0 ? (discountValue / mrp) * 100 : 0;
 
                   // Cross-check against the file's own Discount Value column
                   const rawDisc = row[7];
@@ -592,9 +604,9 @@ export default function Upload() {
           >
             {fileType === "sales" ? (
               <p>
-                📊 <strong>Sales Data File.</strong> Rows are rejected if the invoice number is
-                missing, or if MRP − Net Value doesn't match the stated Discount Value. If any row
-                fails, nothing is uploaded.
+                📊 <strong>Sales Data File.</strong> Rows are rejected if: invoice number is
+                missing, qty is not 1 / -1 (one row per serial), or MRP − Net doesn't match the
+                stated Discount. If any row fails, nothing is uploaded.
               </p>
             ) : (
               <p>
