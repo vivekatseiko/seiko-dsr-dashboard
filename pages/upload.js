@@ -20,7 +20,6 @@ export default function Upload() {
   const [messageType, setMessageType] = useState("");
   const [fileType, setFileType] = useState("sales");
 
-  // Targets Management State
   const [targets, setTargets] = useState([]);
   const [targetsLoading, setTargetsLoading] = useState(true);
   const [targetsError, setTargetsError] = useState("");
@@ -66,8 +65,8 @@ export default function Upload() {
         setTargets(result.data || []);
 
         if (result.data && result.data.length > 0) {
-          const uniqueStores = [...new Set(result.data.map(t => t.store_code))].sort();
-          const uniqueYears = [...new Set(result.data.map(t => t.target_year))].sort((a, b) => b - a);
+          const uniqueStores = [...new Set(result.data.map((t) => t.store_code))].sort();
+          const uniqueYears = [...new Set(result.data.map((t) => t.target_year))].sort((a, b) => b - a);
           setStores(uniqueStores);
           setYears(uniqueYears);
         }
@@ -84,10 +83,7 @@ export default function Upload() {
     if (!confirm("Are you sure you want to delete this target?")) return;
 
     try {
-      const response = await fetch(`/api/targets?id=${id}`, {
-        method: "DELETE",
-      });
-
+      const response = await fetch(`/api/targets?id=${id}`, { method: "DELETE" });
       const result = await response.json();
 
       if (!response.ok) {
@@ -107,14 +103,13 @@ export default function Upload() {
 
   const isValidStoreCode = (code) => {
     if (!code) return false;
-    const upperCode = code.toString().toUpperCase();
-    return VALID_STORE_CODES.includes(upperCode);
+    return VALID_STORE_CODES.includes(code.toString().toUpperCase().trim());
   };
 
   const isDateColumn = (columnName) => {
     if (!columnName) return false;
     const name = columnName.toString().toLowerCase();
-    return name.includes("date") || name.includes("transaction date") || name.includes("invoice date");
+    return name.includes("date");
   };
 
   const parseDate = (dateValue) => {
@@ -135,6 +130,22 @@ export default function Upload() {
     return "";
   };
 
+  // Find the store code anywhere in the top rows, not just B3
+  const findStoreCode = (sheet, XLSX) => {
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const row = rows[i];
+      if (!row) continue;
+      for (let j = 0; j < Math.min(row.length, 10); j++) {
+        const val = row[j];
+        if (val && isValidStoreCode(val)) {
+          return val.toString().toUpperCase().trim();
+        }
+      }
+    }
+    return null;
+  };
+
   const handleTargetFileUpload = async (file) => {
     setLoading(true);
     setMessage("Reading target file...");
@@ -143,113 +154,98 @@ export default function Upload() {
     try {
       const reader = new FileReader();
       reader.onload = async (event) => {
-        try {
-          setMessage("Loading Excel library...");
+        const script = document.createElement("script");
+        script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
 
-          const script = document.createElement("script");
-          script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
-
-          script.onerror = () => {
-            setMessage("❌ Failed to load Excel library.");
-            setMessageType("error");
-            setLoading(false);
-          };
-
-          script.onload = async () => {
-            try {
-              const XLSX = window.XLSX;
-              const workbook = XLSX.read(event.target.result, { type: "array" });
-              const sheet = workbook.Sheets[workbook.SheetNames[0]];
-              const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-
-              setMessage("Parsing target data...");
-
-              let targetRecords = [];
-
-              for (let i = 1; i < rows.length; i++) {
-                const row = rows[i];
-                if (!row || row.length < 7) continue;
-
-                const storeCode = row[0]?.toString().toUpperCase().trim();
-                const month = parseInt(row[2]);
-                const year = parseInt(row[3]);
-                const valueTarget = parseFloat(row[4]);
-
-                if (!isValidStoreCode(storeCode) || !month || !year || !valueTarget || month < 1 || month > 12) {
-                  console.log(`⚠️ Skipping row ${i + 1}: Invalid data`);
-                  continue;
-                }
-
-                targetRecords.push({
-                  store_code: storeCode,
-                  target_month: month,
-                  target_year: year,
-                  value_target: valueTarget,
-                  calibre_1_name: row[5] || null,
-                  calibre_1_qty_target: row[6] ? parseInt(row[6]) : null,
-                  calibre_2_name: row[7] || null,
-                  calibre_2_qty_target: row[8] ? parseInt(row[8]) : null,
-                  calibre_3_name: row[9] || null,
-                  calibre_3_qty_target: row[10] ? parseInt(row[10]) : null,
-                });
-              }
-
-              if (targetRecords.length === 0) {
-                setMessage("❌ No valid target data found in file.");
-                setMessageType("error");
-                setLoading(false);
-                return;
-              }
-
-              setMessage(`Found ${targetRecords.length} target records. Uploading...`);
-
-              const userEmail = localStorage.getItem("userEmail") || "unknown";
-
-              const response = await fetch("/api/targets-upload", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  records: targetRecords,
-                  uploadedBy: userEmail,
-                }),
-              });
-
-              const result = await response.json();
-
-              if (!response.ok) {
-                setMessage(`❌ Upload Failed: ${result.error}`);
-                setMessageType("error");
-                setLoading(false);
-                return;
-              }
-
-              setMessage(`✅ Success! Uploaded ${result.recordsInserted} target records`);
-              setMessageType("success");
-              setLoading(false);
-              setTimeout(() => {
-                setMessage("");
-                fetchTargets();
-              }, 2000);
-            } catch (err) {
-              console.error("Error:", err);
-              setMessage(`❌ Error: ${err.message}`);
-              setMessageType("error");
-              setLoading(false);
-            }
-          };
-
-          document.head.appendChild(script);
-        } catch (err) {
-          console.error("Error:", err);
-          setMessage(`❌ Error: ${err.message}`);
+        script.onerror = () => {
+          setMessage("❌ Failed to load Excel library.");
           setMessageType("error");
           setLoading(false);
-        }
+        };
+
+        script.onload = async () => {
+          try {
+            const XLSX = window.XLSX;
+            const workbook = XLSX.read(event.target.result, { type: "array" });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+            setMessage("Parsing target data...");
+
+            const targetRecords = [];
+
+            for (let i = 1; i < rows.length; i++) {
+              const row = rows[i];
+              if (!row || row.length < 7) continue;
+
+              const storeCode = row[0]?.toString().toUpperCase().trim();
+              const month = parseInt(row[2]);
+              const year = parseInt(row[3]);
+              const valueTarget = parseFloat(row[4]);
+
+              if (!isValidStoreCode(storeCode) || !month || !year || !valueTarget || month < 1 || month > 12) {
+                continue;
+              }
+
+              targetRecords.push({
+                store_code: storeCode,
+                target_month: month,
+                target_year: year,
+                value_target: valueTarget,
+                calibre_1_name: row[5] || null,
+                calibre_1_qty_target: row[6] ? parseInt(row[6]) : null,
+                calibre_2_name: row[7] || null,
+                calibre_2_qty_target: row[8] ? parseInt(row[8]) : null,
+                calibre_3_name: row[9] || null,
+                calibre_3_qty_target: row[10] ? parseInt(row[10]) : null,
+              });
+            }
+
+            if (targetRecords.length === 0) {
+              setMessage("❌ No valid target data found in file.");
+              setMessageType("error");
+              setLoading(false);
+              return;
+            }
+
+            setMessage(`Found ${targetRecords.length} target records. Uploading...`);
+
+            const userEmail = localStorage.getItem("userEmail") || "unknown";
+
+            const response = await fetch("/api/targets-upload", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ records: targetRecords, uploadedBy: userEmail }),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+              setMessage(`❌ Upload Failed: ${result.error}`);
+              setMessageType("error");
+              setLoading(false);
+              return;
+            }
+
+            setMessage(`✅ Uploaded ${result.recordsInserted} target records`);
+            setMessageType("success");
+            setLoading(false);
+            setTimeout(() => {
+              setMessage("");
+              fetchTargets();
+            }, 2000);
+          } catch (err) {
+            setMessage(`❌ Error: ${err.message}`);
+            setMessageType("error");
+            setLoading(false);
+          }
+        };
+
+        document.head.appendChild(script);
       };
 
       reader.readAsArrayBuffer(file);
     } catch (err) {
-      console.error("Error:", err);
       setMessage(`❌ Error: ${err.message}`);
       setMessageType("error");
       setLoading(false);
@@ -264,236 +260,227 @@ export default function Upload() {
     try {
       const reader = new FileReader();
       reader.onload = async (event) => {
-        try {
-          setMessage("Loading Excel library...");
+        const script = document.createElement("script");
+        script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
 
-          const script = document.createElement("script");
-          script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
-
-          script.onerror = () => {
-            setMessage("❌ Failed to load Excel library.");
-            setMessageType("error");
-            setLoading(false);
-          };
-
-          script.onload = async () => {
-            try {
-              const XLSX = window.XLSX;
-              const workbook = XLSX.read(event.target.result, { type: "array" });
-
-              setMessage(`Found ${workbook.SheetNames.length} sheets. Processing...`);
-
-              let allRecords = [];
-              let processedSheets = 0;
-              let skippedSheets = 0;
-              let rejectedRows = [];
-
-              for (const sheetName of workbook.SheetNames) {
-                try {
-                  const sheet = workbook.Sheets[sheetName];
-
-                  const storeCodeCell = sheet["B3"];
-                  const sheetStoreCode = storeCodeCell?.v;
-
-                  if (!sheetStoreCode) {
-                    console.log(`Skipping sheet "${sheetName}" - store code missing in B3`);
-                    skippedSheets++;
-                    continue;
-                  }
-
-                  if (!isValidStoreCode(sheetStoreCode)) {
-                    console.log(`Skipping sheet "${sheetName}" - store code "${sheetStoreCode}" not in master list`);
-                    skippedSheets++;
-                    continue;
-                  }
-
-                  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-
-                  if (!rows || rows.length === 0) {
-                    skippedSheets++;
-                    continue;
-                  }
-
-                  let headerRowIndex = -1;
-                  let dateColumnIndex = -1;
-
-                  for (let i = 0; i < Math.min(rows.length, 30); i++) {
-                    const row = rows[i];
-                    if (!row || row.length === 0) continue;
-
-                    for (let j = 0; j < row.length; j++) {
-                      if (isDateColumn(row[j])) {
-                        headerRowIndex = i;
-                        dateColumnIndex = j;
-                        break;
-                      }
-                    }
-
-                    if (headerRowIndex !== -1) break;
-                  }
-
-                  if (headerRowIndex === -1) {
-                    console.log(`Skipping sheet "${sheetName}" - no Date column found`);
-                    skippedSheets++;
-                    continue;
-                  }
-
-                  let dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[dateColumnIndex]);
-
-                  if (dataRows.length === 0) {
-                    skippedSheets++;
-                    continue;
-                  }
-
-                  if (isDateColumn(dataRows[0][dateColumnIndex])) {
-                    dataRows = dataRows.slice(1);
-                  }
-
-                  if (dataRows.length === 0) {
-                    skippedSheets++;
-                    continue;
-                  }
-
-                  const parsedDate = parseDate(dataRows[0][dateColumnIndex]);
-
-                  if (!parsedDate) {
-                    console.log(`Skipping sheet "${sheetName}" - invalid date format`);
-                    skippedSheets++;
-                    continue;
-                  }
-
-                  processedSheets++;
-                  console.log(`Processing sheet "${sheetName}" (store: ${sheetStoreCode}) with ${dataRows.length} rows`);
-
-                  for (const row of dataRows) {
-                    const transactionDate = parseDate(row[dateColumnIndex]);
-                    const quantity = parseInt(row[3] || 0);
-
-                    if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
-
-                    const invoiceNumber = (row[1] || "").toString().trim();
-                    if (!invoiceNumber) {
-                      rejectedRows.push({
-                        sheet: sheetName,
-                        date: transactionDate,
-                        model: row[2] || "",
-                        serial: row[4] || "",
-                        reason: "Missing invoice number",
-                      });
-                      continue;
-                    }
-
-                    const mrp = parseFloat(row[5] || 0);
-                    const netValue = parseFloat(row[6] || 0);
-
-                    const discountValue = mrp - netValue;
-                    const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
-
-                    allRecords.push({
-                      store_code: sheetStoreCode.toString().toUpperCase(),
-                      transaction_date: transactionDate,
-                      system_invoice_number: invoiceNumber,
-                      model_number: row[2] || "",
-                      quantity: quantity,
-                      serial_number: row[4] || "",
-                      mrp: mrp,
-                      net_value: netValue,
-                      discount_value: parseFloat(discountValue.toFixed(2)),
-                      discount_percentage: parseFloat(discountPercentage.toFixed(2)),
-                      sold_by: row[9] || "",
-                      family: row[11] || "",
-                      calibre: row[12] || "",
-                      customer_name: row[16] || "",
-                      mobile_number: row[17] || "",
-                    });
-                  }
-                } catch (err) {
-                  console.error(`Error processing sheet ${sheetName}:`, err);
-                  skippedSheets++;
-                }
-              }
-
-              // Reject the whole upload if any row is missing an invoice number
-              if (rejectedRows.length > 0) {
-                console.warn("Rejected rows (missing invoice number):", rejectedRows);
-                const detail = rejectedRows
-                  .slice(0, 8)
-                  .map((r) => `${r.sheet} • ${r.date} • ${r.model} • ${r.serial}`)
-                  .join("\n");
-                let msg = `❌ ${rejectedRows.length} row(s) REJECTED — missing invoice number:\n\n${detail}`;
-                if (rejectedRows.length > 8) {
-                  msg += `\n...and ${rejectedRows.length - 8} more (see browser console)`;
-                }
-                msg += `\n\nInvoice number is mandatory. Fix these rows in the source file and re-upload.`;
-                setMessage(msg);
-                setMessageType("error");
-                setLoading(false);
-                return;
-              }
-
-              if (allRecords.length === 0) {
-                setMessage(`❌ No valid data found. Processed: ${processedSheets} sheets, Skipped: ${skippedSheets} sheets`);
-                setMessageType("error");
-                setLoading(false);
-                return;
-              }
-
-              setMessage(`Found ${allRecords.length} records from ${processedSheets} sheet(s). Uploading...`);
-
-              const userEmail = localStorage.getItem("userEmail") || "unknown";
-              const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
-
-              const response = await fetch("/api/upload", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  records: allRecords,
-                  storeCode: uploadStoreCode,
-                  userEmail,
-                }),
-              });
-
-              const result = await response.json();
-
-              if (!response.ok) {
-                setMessage(`❌ Upload Failed: ${result.error}`);
-                setMessageType("error");
-                setLoading(false);
-                return;
-              }
-
-              let summary = `✅ Uploaded ${result.recordsInserted} new record(s) from ${processedSheets} sheet(s).`;
-              if (result.duplicatesSkipped > 0) {
-                summary += ` ${result.duplicatesSkipped} duplicate(s) skipped.`;
-              }
-              if (result.discrepanciesFlagged > 0) {
-                summary += ` ${result.discrepanciesFlagged} flagged for approval.`;
-              }
-
-              setMessage(summary);
-              setMessageType("success");
-              setLoading(false);
-              setTimeout(() => router.push("/dashboard"), 3000);
-            } catch (err) {
-              console.error("Error:", err);
-              setMessage(`❌ Error: ${err.message}`);
-              setMessageType("error");
-              setLoading(false);
-            }
-          };
-
-          document.head.appendChild(script);
-        } catch (err) {
-          console.error("Error:", err);
-          setMessage(`❌ Error: ${err.message}`);
+        script.onerror = () => {
+          setMessage("❌ Failed to load Excel library.");
           setMessageType("error");
           setLoading(false);
-        }
+        };
+
+        script.onload = async () => {
+          try {
+            const XLSX = window.XLSX;
+            const workbook = XLSX.read(event.target.result, { type: "array" });
+
+            setMessage(`Found ${workbook.SheetNames.length} sheets. Processing...`);
+
+            const allRecords = [];
+            const rejectedRows = [];
+            let processedSheets = 0;
+            let skippedSheets = 0;
+
+            for (const sheetName of workbook.SheetNames) {
+              try {
+                const sheet = workbook.Sheets[sheetName];
+
+                const sheetStoreCode = findStoreCode(sheet, XLSX);
+
+                if (!sheetStoreCode) {
+                  console.log(`Skipping "${sheetName}" - no valid store code found in top rows`);
+                  skippedSheets++;
+                  continue;
+                }
+
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+                if (!rows || rows.length === 0) {
+                  skippedSheets++;
+                  continue;
+                }
+
+                let headerRowIndex = -1;
+                let dateColumnIndex = -1;
+
+                for (let i = 0; i < Math.min(rows.length, 30); i++) {
+                  const row = rows[i];
+                  if (!row || row.length === 0) continue;
+                  for (let j = 0; j < row.length; j++) {
+                    if (isDateColumn(row[j])) {
+                      headerRowIndex = i;
+                      dateColumnIndex = j;
+                      break;
+                    }
+                  }
+                  if (headerRowIndex !== -1) break;
+                }
+
+                if (headerRowIndex === -1) {
+                  console.log(`Skipping "${sheetName}" - no Date column found`);
+                  skippedSheets++;
+                  continue;
+                }
+
+                let dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[dateColumnIndex]);
+
+                if (dataRows.length > 0 && isDateColumn(dataRows[0][dateColumnIndex])) {
+                  dataRows = dataRows.slice(1);
+                }
+
+                if (dataRows.length === 0) {
+                  skippedSheets++;
+                  continue;
+                }
+
+                if (!parseDate(dataRows[0][dateColumnIndex])) {
+                  console.log(`Skipping "${sheetName}" - invalid date format`);
+                  skippedSheets++;
+                  continue;
+                }
+
+                processedSheets++;
+                console.log(`Processing "${sheetName}" (${sheetStoreCode}) - ${dataRows.length} rows`);
+
+                for (const row of dataRows) {
+                  const transactionDate = parseDate(row[dateColumnIndex]);
+                  const quantity = parseInt(row[3] || 0);
+
+                  if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
+
+                  // Invoice number is mandatory
+                  const invoiceNumber = (row[1] || "").toString().trim();
+                  if (!invoiceNumber) {
+                    rejectedRows.push({
+                      sheet: sheetName,
+                      date: transactionDate,
+                      model: row[2] || "",
+                      serial: row[4] || "",
+                      reason: "Missing invoice number",
+                    });
+                    continue;
+                  }
+
+                  const mrp = parseFloat(row[5] || 0);
+                  const netValue = parseFloat(row[6] || 0);
+                  const discountValue = mrp - netValue;
+                  const discountPercentage = mrp > 0 ? (discountValue / mrp) * 100 : 0;
+
+                  // Cross-check against the file's own Discount Value column
+                  const rawDisc = row[7];
+                  const fileDiscount =
+                    rawDisc === "" || rawDisc === null || rawDisc === undefined
+                      ? null
+                      : parseFloat(rawDisc);
+
+                  if (fileDiscount !== null && !isNaN(fileDiscount) && Math.abs(fileDiscount - discountValue) > 1) {
+                    rejectedRows.push({
+                      sheet: sheetName,
+                      date: transactionDate,
+                      model: row[2] || "",
+                      serial: row[4] || "",
+                      reason: `Discount mismatch: file says ${fileDiscount.toFixed(0)}, but MRP(${mrp.toFixed(0)}) - Net(${netValue.toFixed(0)}) = ${discountValue.toFixed(0)}`,
+                    });
+                    continue;
+                  }
+
+                  allRecords.push({
+                    store_code: sheetStoreCode,
+                    transaction_date: transactionDate,
+                    system_invoice_number: invoiceNumber,
+                    model_number: row[2] || "",
+                    quantity: quantity,
+                    serial_number: row[4] || "",
+                    mrp: mrp,
+                    net_value: netValue,
+                    discount_value: parseFloat(discountValue.toFixed(2)),
+                    discount_percentage: parseFloat(discountPercentage.toFixed(2)),
+                    sold_by: row[9] || "",
+                    family: row[11] || "",
+                    calibre: row[12] || "",
+                    customer_name: row[16] || "",
+                    mobile_number: row[17] || "",
+                  });
+                }
+              } catch (err) {
+                console.error(`Error on sheet ${sheetName}:`, err);
+                skippedSheets++;
+              }
+            }
+
+            // Fail loudly on any bad row - nothing gets uploaded
+            if (rejectedRows.length > 0) {
+              console.warn("Rejected rows:", rejectedRows);
+              const detail = rejectedRows
+                .slice(0, 8)
+                .map((r) => `${r.sheet} • ${r.date} • ${r.model || "?"} • ${r.serial || "?"}\n    → ${r.reason}`)
+                .join("\n");
+              let msg = `❌ ${rejectedRows.length} row(s) REJECTED:\n\n${detail}`;
+              if (rejectedRows.length > 8) {
+                msg += `\n\n...and ${rejectedRows.length - 8} more (see browser console)`;
+              }
+              msg += `\n\nNothing was uploaded. Fix these rows in the source file and re-upload.`;
+              setMessage(msg);
+              setMessageType("error");
+              setLoading(false);
+              return;
+            }
+
+            if (allRecords.length === 0) {
+              setMessage(`❌ No valid data found. Processed: ${processedSheets} sheets, Skipped: ${skippedSheets} sheets`);
+              setMessageType("error");
+              setLoading(false);
+              return;
+            }
+
+            setMessage(`Found ${allRecords.length} records from ${processedSheets} sheet(s). Uploading...`);
+
+            const userEmail = localStorage.getItem("userEmail") || "unknown";
+            const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
+
+            const response = await fetch("/api/upload", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                records: allRecords,
+                storeCode: uploadStoreCode,
+                userEmail,
+              }),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+              setMessage(`❌ Upload Failed: ${result.error}`);
+              setMessageType("error");
+              setLoading(false);
+              return;
+            }
+
+            let summary = `✅ ${result.recordsInserted} new record(s) uploaded from ${processedSheets} sheet(s).`;
+            if (result.duplicatesSkipped > 0) {
+              summary += `\n${result.duplicatesSkipped} duplicate(s) skipped (already in database).`;
+            }
+            if (result.discrepanciesFlagged > 0) {
+              summary += `\n⚠ ${result.discrepanciesFlagged} row(s) conflict with existing data — awaiting approval on the Discrepancies page.`;
+            }
+
+            setMessage(summary);
+            setMessageType("success");
+            setLoading(false);
+            setTimeout(() => router.push("/dashboard"), 3500);
+          } catch (err) {
+            setMessage(`❌ Error: ${err.message}`);
+            setMessageType("error");
+            setLoading(false);
+          }
+        };
+
+        document.head.appendChild(script);
       };
 
       reader.readAsArrayBuffer(file);
     } catch (err) {
-      console.error("Error:", err);
       setMessage(`❌ Error: ${err.message}`);
       setMessageType("error");
       setLoading(false);
@@ -515,15 +502,7 @@ export default function Upload() {
     <div className={styles.container}>
       <h1>📤 Upload & Manage</h1>
 
-      {/* Tabs */}
-      <div
-        style={{
-          display: "flex",
-          gap: "1rem",
-          marginBottom: "2rem",
-          borderBottom: "2px solid #ddd",
-        }}
-      >
+      <div style={{ display: "flex", gap: "1rem", marginBottom: "2rem", borderBottom: "2px solid #ddd" }}>
         <button
           onClick={() => setActiveTab("sales")}
           style={{
@@ -552,7 +531,6 @@ export default function Upload() {
         </button>
       </div>
 
-      {/* Message */}
       {message && (
         <div
           style={{
@@ -560,18 +538,13 @@ export default function Upload() {
             marginBottom: "1rem",
             borderRadius: "4px",
             whiteSpace: "pre-wrap",
+            fontFamily: "monospace",
+            fontSize: "12px",
+            lineHeight: "1.6",
             backgroundColor:
-              messageType === "success"
-                ? "#dcfce7"
-                : messageType === "error"
-                ? "#fee2e2"
-                : "#dbeafe",
+              messageType === "success" ? "#dcfce7" : messageType === "error" ? "#fee2e2" : "#dbeafe",
             color:
-              messageType === "success"
-                ? "#166534"
-                : messageType === "error"
-                ? "#991b1b"
-                : "#1e40af",
+              messageType === "success" ? "#166534" : messageType === "error" ? "#991b1b" : "#1e40af",
             border:
               messageType === "success"
                 ? "1px solid #86efac"
@@ -584,7 +557,6 @@ export default function Upload() {
         </div>
       )}
 
-      {/* TAB 1: Upload Sales & Targets */}
       {activeTab === "sales" && (
         <div>
           <div style={{ marginBottom: "1.5rem" }}>
@@ -619,9 +591,16 @@ export default function Upload() {
             }}
           >
             {fileType === "sales" ? (
-              <p>📊 <strong>Sales Data File:</strong> Excel file with monthly sheets. Invoice number is mandatory on every row — rows without one will be rejected.</p>
+              <p>
+                📊 <strong>Sales Data File.</strong> Rows are rejected if the invoice number is
+                missing, or if MRP − Net Value doesn't match the stated Discount Value. If any row
+                fails, nothing is uploaded.
+              </p>
             ) : (
-              <p>🎯 <strong>Sales Target File:</strong> Store Code | Store Name | Month (1-12) | Year | Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty</p>
+              <p>
+                🎯 <strong>Sales Target File:</strong> Store Code | Store Name | Month (1-12) | Year
+                | Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty
+              </p>
             )}
           </div>
 
@@ -644,7 +623,6 @@ export default function Upload() {
         </div>
       )}
 
-      {/* TAB 2: Manage Targets */}
       {activeTab === "targets" && (
         <div>
           <div
@@ -662,7 +640,7 @@ export default function Upload() {
               <label>Store:</label>
               <select value={filterStore} onChange={(e) => setFilterStore(e.target.value)}>
                 <option value="all">All Stores</option>
-                {stores.map(s => (
+                {stores.map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
@@ -672,8 +650,8 @@ export default function Upload() {
               <label>Month:</label>
               <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
                 <option value="all">All Months</option>
-                {months.map(m => (
-                  <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                {months.map((m) => (
+                  <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
                 ))}
               </select>
             </div>
@@ -682,7 +660,7 @@ export default function Upload() {
               <label>Year:</label>
               <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
                 <option value="all">All Years</option>
-                {years.map(y => (
+                {years.map((y) => (
                   <option key={y} value={y}>{y}</option>
                 ))}
               </select>
@@ -708,14 +686,7 @@ export default function Upload() {
 
           {!targetsLoading && targets.length > 0 && (
             <div style={{ overflowX: "auto" }}>
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: "11px",
-                  border: "1px solid #ddd",
-                }}
-              >
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", border: "1px solid #ddd" }}>
                 <thead>
                   <tr style={{ backgroundColor: "#f0f0f0" }}>
                     <th style={{ padding: "8px", border: "1px solid #ddd", textAlign: "left", minWidth: "80px" }}>Store</th>
@@ -735,7 +706,7 @@ export default function Upload() {
                   {targets.map((target) => (
                     <tr key={target.id} style={{ borderBottom: "1px solid #ddd" }}>
                       <td style={{ padding: "8px", border: "1px solid #ddd" }}>{target.store_code}</td>
-                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{String(target.target_month).padStart(2, '0')}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{String(target.target_month).padStart(2, "0")}</td>
                       <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center" }}>{target.target_year}</td>
                       <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "right" }}>₹{formatIndianNumber(target.value_target)}</td>
                       <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", fontSize: "10px" }}>{target.calibre_1_name || "-"}</td>
