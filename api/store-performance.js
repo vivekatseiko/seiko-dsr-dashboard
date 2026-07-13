@@ -5,6 +5,27 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Every (year, month) pair the date range touches
+function monthsInRange(startDate, endDate) {
+  const out = [];
+  const s = new Date(startDate);
+  const e = new Date(endDate);
+  let y = s.getFullYear();
+  let m = s.getMonth() + 1;
+  const endY = e.getFullYear();
+  const endM = e.getMonth() + 1;
+
+  while (y < endY || (y === endY && m <= endM)) {
+    out.push({ year: y, month: m });
+    m++;
+    if (m > 12) {
+      m = 1;
+      y++;
+    }
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -13,69 +34,57 @@ export default async function handler(req, res) {
   try {
     const { startDate, endDate, storeCode, city, region } = req.query;
 
-    console.log("📊 Store Performance API called with:", { startDate, endDate, storeCode, city, region });
-
-    // Fetch targets for the period
-    let targetQuery = supabase.from("sales_targets").select("*");
-
-    if (startDate && endDate) {
-      const startMonth = new Date(startDate).getMonth() + 1;
-      const startYear = new Date(startDate).getFullYear();
-      const endMonth = new Date(endDate).getMonth() + 1;
-      const endYear = new Date(endDate).getFullYear();
-
-      // For simplicity, we'll get targets that match the selected period
-      targetQuery = targetQuery
-        .gte("target_year", startYear)
-        .lte("target_year", endYear);
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: "startDate and endDate are required" });
     }
 
-    const { data: targets, error: targetError } = await targetQuery;
+    const periods = monthsInRange(startDate, endDate);
+
+    // 1. Targets — only for months the selected range actually covers
+    const { data: allTargets, error: targetError } = await supabase
+      .from("sales_targets")
+      .select("*");
 
     if (targetError) {
-      console.error("❌ Target fetch error:", targetError);
       return res.status(500).json({ error: targetError.message });
     }
 
-    console.log(`✅ Fetched ${targets?.length || 0} targets`);
+    const targets = (allTargets || []).filter((t) =>
+      periods.some((p) => p.year === t.target_year && p.month === t.target_month)
+    );
 
-    // Fetch sales data for the period
-    let salesQuery = supabase
-      .from("sales_master")
-      .select(
-        `
-        store_code,
-        transaction_date,
-        net_value,
-        quantity,
-        discount_percentage,
-        calibre,
-        customer_e_warranty,
-        store_master(store_name, city, region)
-      `
-      )
-      .eq("is_approved", true);
+    // 2. Sales — paginated so we never silently cap at 1000 rows
+    let sales = [];
+    let from = 0;
+    const pageSize = 1000;
 
-    if (startDate) {
-      salesQuery = salesQuery.gte("transaction_date", startDate);
+    while (true) {
+      let salesQuery = supabase
+        .from("sales_master")
+        .select(
+          `store_code, transaction_date, mrp, net_value, discount_value, quantity,
+           calibre, customer_e_warranty, store_master(store_name, city, region)`
+        )
+        .gte("transaction_date", startDate)
+        .lte("transaction_date", endDate)
+        .range(from, from + pageSize - 1);
+
+      if (storeCode && storeCode !== "all") {
+        salesQuery = salesQuery.eq("store_code", storeCode.toUpperCase());
+      }
+
+      const { data, error: salesError } = await salesQuery;
+
+      if (salesError) {
+        return res.status(500).json({ error: salesError.message });
+      }
+
+      sales = sales.concat(data || []);
+      if (!data || data.length < pageSize) break;
+      from += pageSize;
     }
-    if (endDate) {
-      salesQuery = salesQuery.lte("transaction_date", endDate);
-    }
-    if (storeCode && storeCode !== "all") {
-      salesQuery = salesQuery.eq("store_code", storeCode.toUpperCase());
-    }
 
-    const { data: sales, error: salesError } = await salesQuery;
-
-    if (salesError) {
-      console.error("❌ Sales fetch error:", salesError);
-      return res.status(500).json({ error: salesError.message });
-    }
-
-    console.log(`✅ Fetched ${sales?.length || 0} sales records`);
-
-    // Aggregate sales by store
+    // 3. Aggregate by store
     const storeMetrics = {};
 
     for (const sale of sales) {
@@ -87,130 +96,110 @@ export default async function handler(req, res) {
           store_name: sale.store_master?.store_name || code,
           city: sale.store_master?.city || "",
           region: sale.store_master?.region || "",
-          total_value: 0,
+          total_mrp: 0,
+          total_net: 0,
+          total_discount: 0,
           total_quantity: 0,
-          total_discount_percent: 0,
           transaction_count: 0,
           warranty_count: 0,
-          calibre_sales: {}, // {calibre: {value, qty}}
+          calibre_sales: {},
         };
       }
 
-      storeMetrics[code].total_value += sale.net_value || 0;
-      storeMetrics[code].total_quantity += sale.quantity || 0;
-      storeMetrics[code].total_discount_percent += sale.discount_percentage || 0;
-      storeMetrics[code].transaction_count += 1;
+      const s = storeMetrics[code];
+      const qty = sale.quantity || 0;
+
+      // Returns carry negative qty, so line totals net out correctly
+      s.total_mrp += (sale.mrp || 0) * qty;
+      s.total_net += (sale.net_value || 0) * qty;
+      s.total_discount += (sale.discount_value || 0) * qty;
+      s.total_quantity += qty;
+      s.transaction_count += 1;
 
       if (sale.customer_e_warranty) {
-        storeMetrics[code].warranty_count += 1;
+        s.warranty_count += 1;
       }
 
-      // Track calibre-wise sales
       const calibre = sale.calibre || "Unknown";
-      if (!storeMetrics[code].calibre_sales[calibre]) {
-        storeMetrics[code].calibre_sales[calibre] = { value: 0, qty: 0 };
+      if (!s.calibre_sales[calibre]) {
+        s.calibre_sales[calibre] = { value: 0, qty: 0 };
       }
-      storeMetrics[code].calibre_sales[calibre].value += sale.net_value || 0;
-      storeMetrics[code].calibre_sales[calibre].qty += sale.quantity || 0;
+      s.calibre_sales[calibre].value += (sale.net_value || 0) * qty;
+      s.calibre_sales[calibre].qty += qty;
     }
 
-    // Calculate final metrics
+    // 4. Final metrics
     const storePerformance = Object.values(storeMetrics).map((store) => {
-      const target = targets.find(
-        (t) => t.store_code === store.store_code
-      );
+      // Sum targets across every month in range (handles multi-month spans)
+      const storeTargets = targets.filter((t) => t.store_code === store.store_code);
 
-      const avgDiscountPercent = store.transaction_count > 0
-        ? store.total_discount_percent / store.transaction_count
+      const valueTarget = storeTargets.reduce((sum, t) => sum + (parseFloat(t.value_target) || 0), 0);
+
+      // Blended discount: total discount as a share of total MRP - not an average of percentages
+      const discountPercent = store.total_mrp > 0
+        ? (store.total_discount / store.total_mrp) * 100
         : 0;
 
       const warrantyPercent = store.transaction_count > 0
         ? (store.warranty_count / store.transaction_count) * 100
         : 0;
 
-      const valueAchievementPercent = target && target.value_target > 0
-        ? (store.total_value / target.value_target) * 100
+      const valueAchievementPercent = valueTarget > 0
+        ? (store.total_net / valueTarget) * 100
         : 0;
 
-      // Calculate calibre achievements
-      const calibreMetrics = [];
-      
-      if (target) {
-        // Calibre 1
-        if (target.calibre_1_name) {
-          const achieved = store.calibre_sales[target.calibre_1_name]?.qty || 0;
-          const target_qty = target.calibre_1_qty_target || 0;
-          const achievement = target_qty > 0 ? (achieved / target_qty) * 100 : 0;
-          
-          calibreMetrics.push({
-            name: target.calibre_1_name,
-            target: target_qty,
-            achieved: achieved,
-            achievement_percent: achievement,
-          });
-        }
-
-        // Calibre 2
-        if (target.calibre_2_name) {
-          const achieved = store.calibre_sales[target.calibre_2_name]?.qty || 0;
-          const target_qty = target.calibre_2_qty_target || 0;
-          const achievement = target_qty > 0 ? (achieved / target_qty) * 100 : 0;
-          
-          calibreMetrics.push({
-            name: target.calibre_2_name,
-            target: target_qty,
-            achieved: achieved,
-            achievement_percent: achievement,
-          });
-        }
-
-        // Calibre 3
-        if (target.calibre_3_name) {
-          const achieved = store.calibre_sales[target.calibre_3_name]?.qty || 0;
-          const target_qty = target.calibre_3_qty_target || 0;
-          const achievement = target_qty > 0 ? (achieved / target_qty) * 100 : 0;
-          
-          calibreMetrics.push({
-            name: target.calibre_3_name,
-            target: target_qty,
-            achieved: achieved,
-            achievement_percent: achievement,
-          });
+      // Calibre targets, summed by name across the months in range
+      const calibreTargets = {};
+      for (const t of storeTargets) {
+        for (const i of [1, 2, 3]) {
+          const name = t[`calibre_${i}_name`];
+          const qty = t[`calibre_${i}_qty_target`];
+          if (name) {
+            calibreTargets[name] = (calibreTargets[name] || 0) + (parseInt(qty) || 0);
+          }
         }
       }
+
+      const calibreMetrics = Object.entries(calibreTargets).map(([name, target_qty]) => {
+        const achieved = store.calibre_sales[name]?.qty || 0;
+        return {
+          name,
+          target: target_qty,
+          achieved,
+          achievement_percent: target_qty > 0 ? (achieved / target_qty) * 100 : 0,
+        };
+      });
 
       return {
         store_code: store.store_code,
         store_name: store.store_name,
         city: store.city,
         region: store.region,
-        value_target: target?.value_target || 0,
-        value_achieved: store.total_value,
+        value_target: valueTarget,
+        mrp_value: store.total_mrp,
+        value_achieved: store.total_net,
+        discount_value: store.total_discount,
         value_achievement_percent: valueAchievementPercent,
         calibre_metrics: calibreMetrics,
-        avg_discount_percent: parseFloat(avgDiscountPercent.toFixed(2)),
+        avg_discount_percent: parseFloat(discountPercent.toFixed(2)),
         warranty_percent: parseFloat(warrantyPercent.toFixed(2)),
+        total_quantity: store.total_quantity,
       };
     });
 
-    // Filter by city and region if provided
     let filtered = storePerformance;
 
     if (city && city !== "all") {
       filtered = filtered.filter((s) => s.city === city);
     }
-
     if (region && region !== "all") {
       filtered = filtered.filter((s) => s.region === region);
     }
 
     filtered = filtered.sort((a, b) => a.store_code.localeCompare(b.store_code));
 
-    console.log(`✅ Calculated metrics for ${filtered.length} stores`);
-
     return res.status(200).json({ data: filtered });
   } catch (error) {
-    console.error("❌ Store Performance API error:", error);
     return res.status(500).json({ error: error.message });
   }
 }
