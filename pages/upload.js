@@ -377,7 +377,7 @@ export default function Upload() {
                     const transactionDate = parseDate(row[dateColumnIndex]);
                     const quantity = parseInt(row[3] || 0);
 
-                    if (!transactionDate || !quantity || quantity <= 0) continue;
+                    if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
 
                     const mrp = parseFloat(row[5] || 0);
                     const netValue = parseFloat(row[6] || 0);
