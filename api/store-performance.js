@@ -40,7 +40,7 @@ export default async function handler(req, res) {
 
     const periods = monthsInRange(startDate, endDate);
 
-    // 1. Targets — only for months the selected range actually covers
+    // 1. Targets - only for months the selected range actually covers
     const { data: allTargets, error: targetError } = await supabase
       .from("sales_targets")
       .select("*");
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
       periods.some((p) => p.year === t.target_year && p.month === t.target_month)
     );
 
-    // 2. Sales — paginated so we never silently cap at 1000 rows
+    // 2. Sales - paginated so we never silently cap at 1000 rows
     let sales = [];
     let from = 0;
     const pageSize = 1000;
@@ -130,12 +130,14 @@ export default async function handler(req, res) {
 
     // 4. Final metrics
     const storePerformance = Object.values(storeMetrics).map((store) => {
-      // Sum targets across every month in range (handles multi-month spans)
       const storeTargets = targets.filter((t) => t.store_code === store.store_code);
 
-      const valueTarget = storeTargets.reduce((sum, t) => sum + (parseFloat(t.value_target) || 0), 0);
+      const valueTarget = storeTargets.reduce(
+        (sum, t) => sum + (parseFloat(t.value_target) || 0),
+        0
+      );
 
-      // Blended discount: total discount as a share of total MRP - not an average of percentages
+      // Blended discount: total discount as a share of total MRP
       const discountPercent = store.total_mrp > 0
         ? (store.total_discount / store.total_mrp) * 100
         : 0;
@@ -148,7 +150,7 @@ export default async function handler(req, res) {
         ? (store.total_net / valueTarget) * 100
         : 0;
 
-      // Calibre targets, summed by name across the months in range
+      // Calibre targets, summed by name across months in range
       const calibreTargets = {};
       for (const t of storeTargets) {
         for (const i of [1, 2, 3]) {
