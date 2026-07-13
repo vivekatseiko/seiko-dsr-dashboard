@@ -109,10 +109,11 @@ export default async function handler(req, res) {
       const s = storeMetrics[code];
       const qty = sale.quantity || 0;
 
-      // Returns carry negative qty, so line totals net out correctly
-      s.total_mrp += (sale.mrp || 0) * qty;
-      s.total_net += (sale.net_value || 0) * qty;
-      s.total_discount += (sale.discount_value || 0) * qty;
+      // Value columns are signed line totals (returns are negative).
+      // Sum directly - never multiply by qty, or returns double-negate.
+      s.total_mrp += sale.mrp || 0;
+      s.total_net += sale.net_value || 0;
+      s.total_discount += sale.discount_value || 0;
       s.total_quantity += qty;
       s.transaction_count += 1;
 
@@ -124,7 +125,7 @@ export default async function handler(req, res) {
       if (!s.calibre_sales[calibre]) {
         s.calibre_sales[calibre] = { value: 0, qty: 0 };
       }
-      s.calibre_sales[calibre].value += (sale.net_value || 0) * qty;
+      s.calibre_sales[calibre].value += sale.net_value || 0;
       s.calibre_sales[calibre].qty += qty;
     }
 
