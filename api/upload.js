@@ -5,29 +5,32 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-export default async function handler(req, res) {
-  console.log("🔵 [1] API Upload called");
+function normDate(d) {
+  if (!d) return "";
+  return String(d).split("T")[0];
+}
 
+function isClose(a, b, epsilon = 0.01) {
+  const numA = parseFloat(a);
+  const numB = parseFloat(b);
+  if (isNaN(numA) || isNaN(numB)) return false;
+  return Math.abs(numA - numB) < epsilon;
+}
+
+export default async function handler(req, res) {
   if (req.method !== "POST") {
-    console.log("❌ [2] Method not POST:", req.method);
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
     const { records, storeCode, userEmail } = req.body;
-    console.log("🔵 [3] Received data:", { recordsCount: records?.length, storeCode, userEmail });
 
     if (!records || !storeCode || !userEmail) {
-      console.log("❌ [4] Missing required fields");
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     const uploadTimestamp = new Date().toISOString();
-    console.log("🔵 [5] Upload timestamp:", uploadTimestamp);
 
-    console.log("🔵 [6] Creating upload log entry...");
-    
-    // Create upload log entry
     const { data: uploadLog, error: logError } = await supabase
       .from("sales_uploads_log")
       .insert({
@@ -46,95 +49,151 @@ export default async function handler(req, res) {
       .single();
 
     if (logError) {
-      console.error("❌ [7] Upload log creation failed:", logError);
-      console.error("Error message:", logError.message);
-      console.error("Error details:", JSON.stringify(logError));
       return res.status(500).json({ error: `Failed to create upload log: ${logError.message}` });
     }
 
-    console.log("✅ [8] Upload log created with ID:", uploadLog.id);
-
     try {
-      console.log("🔵 [9] Inserting records into sales_master...");
-      
-      const { error: insertError, data: insertData } = await supabase
-        .from("sales_master")
-        .insert(
-          records.map((r) => ({
-            store_code: r.store_code,
-            transaction_date: r.transaction_date,
-            system_invoice_number: r.system_invoice_number,
-            model_number: r.model_number,
-            quantity: r.quantity,
-            serial_number: r.serial_number,
-            mrp: r.mrp,
-            net_value: r.net_value,
-            discount_value: r.discount_value,
-            discount_percentage: r.discount_percentage,
-            sold_by: r.sold_by,
-            family: r.family,
-            calibre: r.calibre,
-            customer_name: r.customer_name,
-            mobile_number: r.mobile_number,
-          }))
-        );
+      // 1. Fetch existing rows for this store sharing an invoice number with the incoming file
+      const invoiceNumbers = [...new Set(records.map((r) => r.system_invoice_number).filter(Boolean))];
 
-      if (insertError) {
-        console.error("❌ [10] Insert error:", insertError);
-        console.error("Error message:", insertError.message);
-        throw insertError;
+      let existingRows = [];
+      if (invoiceNumbers.length > 0) {
+        const { data: existingData, error: fetchError } = await supabase
+          .from("sales_master")
+          .select("*")
+          .eq("store_code", storeCode)
+          .in("system_invoice_number", invoiceNumbers);
+
+        if (fetchError) throw fetchError;
+        existingRows = existingData || [];
       }
 
-      console.log("✅ [11] Records inserted successfully. Count:", records.length);
+      // 2. Lookup map keyed on invoice|serial|quantity (matches the DB unique constraint)
+      const existingMap = {};
+      for (const row of existingRows) {
+        const key = `${row.system_invoice_number}|${row.serial_number}|${row.quantity}`;
+        existingMap[key] = row;
+      }
 
-      console.log("🔵 [12] Updating upload log to Completed...");
-      
+      // 3. Classify each incoming record
+      const toInsert = [];
+      const toFlag = [];
+      let duplicateCount = 0;
+      const seenInBatch = new Set();
+
+      for (const r of records) {
+        const key = `${r.system_invoice_number}|${r.serial_number}|${r.quantity}`;
+
+        // Guard against the same line appearing twice within one file
+        if (seenInBatch.has(key)) {
+          duplicateCount++;
+          continue;
+        }
+
+        const existing = existingMap[key];
+
+        if (!existing) {
+          seenInBatch.add(key);
+          toInsert.push(r);
+          continue;
+        }
+
+        const sameDate = normDate(existing.transaction_date) === normDate(r.transaction_date);
+        const sameNet = isClose(existing.net_value, r.net_value);
+
+        if (sameDate && sameNet) {
+          duplicateCount++;
+          continue;
+        }
+
+        toFlag.push({ existing, incoming: r });
+      }
+
+      // 4. Insert new/valid records
+      if (toInsert.length > 0) {
+        const { error: insertError } = await supabase
+          .from("sales_master")
+          .insert(
+            toInsert.map((r) => ({
+              store_code: r.store_code,
+              transaction_date: r.transaction_date,
+              system_invoice_number: r.system_invoice_number,
+              model_number: r.model_number,
+              quantity: r.quantity,
+              serial_number: r.serial_number,
+              mrp: r.mrp,
+              net_value: r.net_value,
+              discount_value: r.discount_value,
+              discount_percentage: r.discount_percentage,
+              sold_by: r.sold_by,
+              family: r.family,
+              calibre: r.calibre,
+              customer_name: r.customer_name,
+              mobile_number: r.mobile_number,
+              upload_id: uploadLog.id,
+            }))
+          );
+
+        if (insertError) throw insertError;
+      }
+
+      // 5. Flag conflicts for admin review
+      if (toFlag.length > 0) {
+        const { error: flagError } = await supabase
+          .from("discrepancies")
+          .insert(
+            toFlag.map(({ existing, incoming }) => ({
+              upload_id: uploadLog.id,
+              store_code: storeCode,
+              transaction_date: existing.transaction_date,
+              system_invoice_number: incoming.system_invoice_number,
+              model_number: incoming.model_number,
+              serial_number: incoming.serial_number,
+              field_changed: "full_record",
+              old_value: JSON.stringify(existing),
+              new_value: JSON.stringify(incoming),
+              status: "pending",
+            }))
+          );
+
+        if (flagError) throw flagError;
+      }
+
+      // 6. Update upload log
       const { error: updateError } = await supabase
         .from("sales_uploads_log")
-        .update({ 
+        .update({
           status: "Completed",
-          new_entries_count: records.length,
+          new_entries_count: toInsert.length,
+          duplicate_entries_count: duplicateCount,
+          discrepancy_entries_count: toFlag.length,
         })
         .eq("id", uploadLog.id);
 
-      if (updateError) {
-        console.error("❌ [13] Update log error:", updateError);
-        throw updateError;
-      }
-
-      console.log("✅ [14] Upload log updated to Completed");
+      if (updateError) throw updateError;
 
       return res.status(200).json({
         success: true,
         uploadId: uploadLog.id,
-        recordsInserted: records.length,
+        recordsInserted: toInsert.length,
+        duplicatesSkipped: duplicateCount,
+        discrepanciesFlagged: toFlag.length,
         storeCode,
       });
     } catch (err) {
-      console.error("❌ [15] Insert/Update error:", err);
-      console.error("Error message:", err.message);
+      const fullError = [err.message, err.details, err.hint].filter(Boolean).join(" | ");
 
-      console.log("🔵 [16] Updating upload log with error status...");
-      
-      const { error: updateErr } = await supabase
+      await supabase
         .from("sales_uploads_log")
-        .update({ 
+        .update({
           status: "Failed",
-          error_message: err.message,
+          error_message: fullError,
         })
         .eq("id", uploadLog.id);
 
-      if (updateErr) {
-        console.error("❌ [17] Failed to update error log:", updateErr);
-      } else {
-        console.log("✅ [18] Error log updated");
-      }
-
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: fullError });
     }
   } catch (error) {
-    console.error("❌ [19] Main error:", error);
-    console.error("Error message:", error.message);
     return res.status(500).json({ error: error.message });
   }
 }
