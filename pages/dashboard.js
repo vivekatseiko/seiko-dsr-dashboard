@@ -18,7 +18,7 @@ const formatIndianNumber = (num) => {
 
 const formatYAxisValue = (value) => {
   if (value >= 10000000) {
-    return (value / 10000000).toFixed(0) + "Cr";
+    return (value / 10000000).toFixed(1) + "Cr";
   } else if (value >= 100000) {
     return (value / 100000).toFixed(1) + "L";
   } else if (value >= 1000) {
@@ -38,7 +38,7 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  
+
   const [city, setCity] = useState("all");
   const [region, setRegion] = useState("all");
   const [storeCode, setStoreCode] = useState("all");
@@ -75,7 +75,6 @@ export default function Dashboard() {
         setError(result.error || "Failed to fetch data");
         setData(null);
       } else {
-        console.log("✅ API Data received - Historical Avgs:", { weekday: result.historicalWeekdayAvg, weekend: result.historicalWeekendAvg });
         setData(result);
       }
     } catch (err) {
@@ -112,10 +111,10 @@ export default function Dashboard() {
       if (!chartDataByStore[store]) {
         chartDataByStore[store] = [];
       }
-      
+
       const isWeekend = record.dayOfWeek === 0 || record.dayOfWeek === 6;
-      
-      const dataPoint = {
+
+      chartDataByStore[store].push({
         date: record.date,
         formattedDate: formatDate(record.date),
         sales: record.sales,
@@ -123,10 +122,9 @@ export default function Dashboard() {
         discount: record.discount,
         isWeekend: isWeekend,
         dayOfWeek: record.dayOfWeek,
-        weekendBarHeight: isWeekend ? 10000000 : 0,
-      };
-      
-      chartDataByStore[store].push(dataPoint);
+        // 1 on a hidden 0-1 axis: full-height background band without touching the sales scale
+        weekendBand: isWeekend ? 1 : 0,
+      });
     }
   }
 
@@ -257,108 +255,129 @@ export default function Dashboard() {
       {Recharts && Object.keys(chartDataByStore).length > 0 && (
         <div style={{ marginTop: "2rem" }}>
           <h2>Daily Sales Trend (by Store)</h2>
-          {Object.entries(chartDataByStore).map(([store, trendData], storeIdx) => (
-            <div key={store} style={{ marginTop: "2rem", overflowX: "auto" }}>
-              <h3>{store}</h3>
+          {Object.entries(chartDataByStore).map(([store, trendData], storeIdx) => {
+            // Y axis scales to THIS store's sales, never the weekend band
+            const salesValues = trendData.map((d) => d.sales || 0);
+            const refLines = [data.historicalWeekdayAvg, data.historicalWeekendAvg].filter(
+              (v) => v !== null && v !== undefined
+            );
+            const maxY = Math.max(...salesValues, ...refLines, 1) * 1.15;
 
-              <Recharts.ComposedChart
-                width={1200}
-                height={400}
-                data={trendData}
-                margin={{ top: 5, right: 30, left: 0, bottom: 80 }}
-              >
-                <Recharts.CartesianGrid strokeDasharray="3 3" />
-                <Recharts.XAxis
-                  dataKey="formattedDate"
-                  interval={Math.max(0, Math.ceil(trendData.length / 12) - 1)}
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                />
-                <Recharts.YAxis tickFormatter={formatYAxisValue} />
-                <Recharts.Tooltip
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const d = payload[0].payload;
-                      const dayType = d.isWeekend ? "Weekend 🌅" : "Weekday 📅";
-                      return (
-                        <div style={{
-                          backgroundColor: "#fff",
-                          padding: "10px",
-                          border: "1px solid #ccc",
-                          borderRadius: "4px",
-                          fontSize: "12px",
-                        }}>
-                          <p style={{ margin: 0 }}>📅 Date: {d.date}</p>
-                          <p style={{ margin: 0 }}>💰 Sales: ₹{formatIndianNumber(Math.round(d.sales / 100000))}L</p>
-                          <p style={{ margin: 0 }}>📦 Qty: {formatIndianNumber(d.quantity)}</p>
-                          <p style={{ margin: 0 }}>{dayType}</p>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Recharts.Legend />
+            return (
+              <div key={store} style={{ marginTop: "2rem", overflowX: "auto" }}>
+                <h3>{store}</h3>
 
-                {/* Weekend bar background - NO GAPS */}
-                <Recharts.Bar
-                  dataKey="weekendBarHeight"
-                  fill="#ffb366"
-                  opacity={0.3}
-                  isAnimationActive={false}
+                <Recharts.ComposedChart
+                  width={1200}
+                  height={400}
+                  data={trendData}
+                  margin={{ top: 5, right: 30, left: 0, bottom: 80 }}
                   barCategoryGap={0}
-                />
-
-                {/* Sales line - centered on bars */}
-                <Recharts.Line
-                  type="monotone"
-                  dataKey="sales"
-                  stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]}
-                  name={`${store} Sales`}
-                  connectNulls={false}
-                  dot={(props) => {
-                    const { cx, cy, payload } = props;
-                    if (!payload) return null;
-                    if (payload.isWeekend) {
-                      return <circle cx={cx} cy={cy} r={6} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.9} strokeWidth={2} stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
-                    }
-                    return <circle cx={cx} cy={cy} r={3} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
-                  }}
-                />
-
-                {/* Historical Weekday Average Line */}
-                {data.historicalWeekdayAvg !== null && (
-                  <Recharts.ReferenceLine
-                    y={data.historicalWeekdayAvg}
-                    stroke="#000"
-                    strokeDasharray="5 5"
-                    strokeWidth={2}
-                    name={`Historical Weekday Avg (₹${formatIndianNumber(Math.round(data.historicalWeekdayAvg / 100000))}L)`}
+                  barGap={0}
+                >
+                  <Recharts.CartesianGrid strokeDasharray="3 3" />
+                  <Recharts.XAxis
+                    dataKey="formattedDate"
+                    interval={Math.max(0, Math.ceil(trendData.length / 12) - 1)}
+                    angle={-45}
+                    textAnchor="end"
+                    height={80}
                   />
-                )}
-
-                {/* Historical Weekend Average Line */}
-                {data.historicalWeekendAvg !== null && (
-                  <Recharts.ReferenceLine
-                    y={data.historicalWeekendAvg}
-                    stroke="#000"
-                    strokeDasharray="10 5"
-                    strokeWidth={2}
-                    name={`Historical Weekend Avg (₹${formatIndianNumber(Math.round(data.historicalWeekendAvg / 100000))}L)`}
+                  {/* Left axis: sales, scaled to this store's data */}
+                  <Recharts.YAxis
+                    yAxisId="sales"
+                    tickFormatter={formatYAxisValue}
+                    domain={[0, maxY]}
+                    allowDataOverflow={false}
                   />
-                )}
-              </Recharts.ComposedChart>
+                  {/* Hidden axis for the weekend band: 0 to 1 so the band always fills full height */}
+                  <Recharts.YAxis yAxisId="band" hide domain={[0, 1]} />
+                  <Recharts.Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const d = payload[0].payload;
+                        const dayType = d.isWeekend ? "Weekend 🌅" : "Weekday 📅";
+                        return (
+                          <div style={{
+                            backgroundColor: "#fff",
+                            padding: "10px",
+                            border: "1px solid #ccc",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                          }}>
+                            <p style={{ margin: 0 }}>📅 Date: {d.date}</p>
+                            <p style={{ margin: 0 }}>💰 Sales: ₹{formatIndianNumber(Math.round(d.sales / 100000))}L</p>
+                            <p style={{ margin: 0 }}>📦 Qty: {formatIndianNumber(d.quantity)}</p>
+                            <p style={{ margin: 0 }}>{dayType}</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Recharts.Legend />
 
-              <div style={{ marginTop: "1rem", fontSize: "12px", display: "flex", flexWrap: "wrap", gap: "2rem" }}>
-                <span>🔵 Weekday (small dot)</span>
-                <span>🔴 Weekend (large dot)</span>
-                <span style={{ backgroundColor: "#ffb366", opacity: 0.3, padding: "2px 6px", borderRadius: "3px" }}>🟠 Weekend Background</span>
-                {data.historicalWeekdayAvg !== null && <span>— Weekday Avg (5px dash)</span>}
-                {data.historicalWeekendAvg !== null && <span>— Weekend Avg (10px dash)</span>}
+                  {/* Weekend background band - full height on hidden axis, zero gaps */}
+                  <Recharts.Bar
+                    yAxisId="band"
+                    dataKey="weekendBand"
+                    name="Weekend"
+                    fill="#ffb366"
+                    opacity={0.3}
+                    isAnimationActive={false}
+                  />
+
+                  {/* Sales line */}
+                  <Recharts.Line
+                    yAxisId="sales"
+                    type="monotone"
+                    dataKey="sales"
+                    stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]}
+                    name={`${store} Sales`}
+                    connectNulls={false}
+                    dot={(props) => {
+                      const { cx, cy, payload } = props;
+                      if (!payload) return null;
+                      if (payload.isWeekend) {
+                        return <circle cx={cx} cy={cy} r={6} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.9} strokeWidth={2} stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
+                      }
+                      return <circle cx={cx} cy={cy} r={3} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
+                    }}
+                  />
+
+                  {/* Historical Weekday Average Line */}
+                  {data.historicalWeekdayAvg !== null && (
+                    <Recharts.ReferenceLine
+                      yAxisId="sales"
+                      y={data.historicalWeekdayAvg}
+                      stroke="#000"
+                      strokeDasharray="5 5"
+                      strokeWidth={2}
+                    />
+                  )}
+
+                  {/* Historical Weekend Average Line */}
+                  {data.historicalWeekendAvg !== null && (
+                    <Recharts.ReferenceLine
+                      yAxisId="sales"
+                      y={data.historicalWeekendAvg}
+                      stroke="#000"
+                      strokeDasharray="10 5"
+                      strokeWidth={2}
+                    />
+                  )}
+                </Recharts.ComposedChart>
+
+                <div style={{ marginTop: "1rem", fontSize: "12px", display: "flex", flexWrap: "wrap", gap: "2rem" }}>
+                  <span>🔵 Weekday (small dot)</span>
+                  <span>🔵 Weekend (large dot)</span>
+                  <span style={{ backgroundColor: "#ffb366", opacity: 0.5, padding: "2px 6px", borderRadius: "3px" }}>Weekend background</span>
+                  {data.historicalWeekdayAvg !== null && <span>— Weekday Avg (5px dash)</span>}
+                  {data.historicalWeekendAvg !== null && <span>— Weekend Avg (10px dash)</span>}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
