@@ -53,7 +53,7 @@ export default async function handler(req, res) {
     }
 
     try {
-      // 1. Fetch existing rows for this store sharing an invoice number with the incoming file
+      // ---------- 1. Fetch existing rows sharing an invoice number ----------
       const invoiceNumbers = [...new Set(records.map((r) => r.system_invoice_number).filter(Boolean))];
 
       let existingRows = [];
@@ -68,23 +68,21 @@ export default async function handler(req, res) {
         existingRows = existingData || [];
       }
 
-      // 2. Lookup map keyed on invoice|serial|quantity (matches the DB unique constraint)
       const existingMap = {};
       for (const row of existingRows) {
         const key = `${row.system_invoice_number}|${row.serial_number}|${row.quantity}`;
         existingMap[key] = row;
       }
 
-      // 3. Classify each incoming record
-      const toInsert = [];
-      const toFlag = [];
+      // ---------- 2. Classify: duplicate / value-conflict / candidate ----------
+      const candidates = [];
+      const toFlag = []; // { type, existing, incoming }
       let duplicateCount = 0;
       const seenInBatch = new Set();
 
       for (const r of records) {
         const key = `${r.system_invoice_number}|${r.serial_number}|${r.quantity}`;
 
-        // Guard against the same line appearing twice within one file
         if (seenInBatch.has(key)) {
           duplicateCount++;
           continue;
@@ -94,7 +92,7 @@ export default async function handler(req, res) {
 
         if (!existing) {
           seenInBatch.add(key);
-          toInsert.push(r);
+          candidates.push(r);
           continue;
         }
 
@@ -106,10 +104,61 @@ export default async function handler(req, res) {
           continue;
         }
 
-        toFlag.push({ existing, incoming: r });
+        toFlag.push({ type: "full_record", existing, incoming: r });
       }
 
-      // 4. Insert new/valid records
+      // ---------- 3. Serial-reuse check (model + serial scoped) ----------
+      // A +1 sale of a model+serial whose net position is already >= 1
+      // (i.e. sold and not returned) goes to the approval queue.
+      const serials = [...new Set(candidates.map((r) => (r.serial_number || "").trim()).filter(Boolean))];
+
+      const positions = {}; // "model|serial" -> net quantity currently in DB
+
+      if (serials.length > 0) {
+        const { data: serialRows, error: serialError } = await supabase
+          .from("sales_master")
+          .select("model_number, serial_number, quantity, transaction_date, system_invoice_number, net_value")
+          .eq("store_code", storeCode)
+          .in("serial_number", serials);
+
+        if (serialError) throw serialError;
+
+        for (const row of serialRows || []) {
+          const k = `${row.model_number}|${row.serial_number}`;
+          positions[k] = (positions[k] || 0) + (row.quantity || 0);
+        }
+      }
+
+      // Process in date order so sale -> return -> resale nets correctly
+      const sorted = [...candidates].sort((a, b) =>
+        normDate(a.transaction_date).localeCompare(normDate(b.transaction_date))
+      );
+
+      const toInsert = [];
+
+      for (const r of sorted) {
+        const serial = (r.serial_number || "").trim();
+
+        // Rows without a serial (e.g. some returns) skip this check
+        if (!serial) {
+          toInsert.push(r);
+          continue;
+        }
+
+        const k = `${r.model_number}|${serial}`;
+        const pos = positions[k] || 0;
+
+        if (r.quantity > 0 && pos >= 1) {
+          // Same model+serial already sold and not returned - needs admin approval
+          toFlag.push({ type: "serial_reuse", existing: null, incoming: r });
+          continue;
+        }
+
+        positions[k] = pos + r.quantity;
+        toInsert.push(r);
+      }
+
+      // ---------- 4. Insert clean records ----------
       if (toInsert.length > 0) {
         const { error: insertError } = await supabase
           .from("sales_master")
@@ -137,20 +186,20 @@ export default async function handler(req, res) {
         if (insertError) throw insertError;
       }
 
-      // 5. Flag conflicts for admin review
+      // ---------- 5. Flag conflicts for admin review ----------
       if (toFlag.length > 0) {
         const { error: flagError } = await supabase
           .from("discrepancies")
           .insert(
-            toFlag.map(({ existing, incoming }) => ({
+            toFlag.map(({ type, existing, incoming }) => ({
               upload_id: uploadLog.id,
               store_code: storeCode,
-              transaction_date: existing.transaction_date,
+              transaction_date: existing ? existing.transaction_date : incoming.transaction_date,
               system_invoice_number: incoming.system_invoice_number,
               model_number: incoming.model_number,
               serial_number: incoming.serial_number,
-              field_changed: "full_record",
-              old_value: JSON.stringify(existing),
+              field_changed: type, // 'full_record' or 'serial_reuse'
+              old_value: existing ? JSON.stringify(existing) : null,
               new_value: JSON.stringify(incoming),
               status: "pending",
             }))
@@ -159,7 +208,7 @@ export default async function handler(req, res) {
         if (flagError) throw flagError;
       }
 
-      // 6. Update upload log
+      // ---------- 6. Update upload log ----------
       const { error: updateError } = await supabase
         .from("sales_uploads_log")
         .update({
