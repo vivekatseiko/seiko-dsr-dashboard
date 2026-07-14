@@ -477,10 +477,76 @@ export default function Upload() {
               summary += `\n⚠ ${result.discrepanciesFlagged} row(s) conflict with existing data — awaiting approval on the Discrepancies page.`;
             }
 
+            // ---- Reconciliation: compare file totals vs database totals per month ----
+            try {
+              const fileTotals = {};
+              for (const r of allRecords) {
+                const ym = r.transaction_date.substring(0, 7); // "2026-06"
+                if (!fileTotals[ym]) {
+                  fileTotals[ym] = { net: 0, mrp: 0, rows: 0 };
+                }
+                fileTotals[ym].net += r.net_value;
+                fileTotals[ym].mrp += r.mrp;
+                fileTotals[ym].rows += 1;
+              }
+
+              const monthKeys = Object.keys(fileTotals).sort();
+              const recon = await fetch(
+                `/api/reconcile?storeCode=${uploadStoreCode}&months=${monthKeys.join(",")}`
+              );
+              const reconResult = await recon.json();
+
+              if (recon.ok && reconResult.data) {
+                const ghostWarnings = [];
+                const pendingNotes = [];
+
+                for (const ym of monthKeys) {
+                  const f = fileTotals[ym];
+                  const d = reconResult.data[ym];
+                  if (!d) continue;
+
+                  const diff = d.total_net - f.net;
+
+                  if (diff > 1) {
+                    // Database holds MORE than the file: ghost rows from earlier uploads
+                    ghostWarnings.push(
+                      `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} vs file ₹${Math.round(f.net).toLocaleString("en-IN")} (+₹${Math.round(diff).toLocaleString("en-IN")}, ${d.row_count - f.rows} extra row(s))`
+                    );
+                  } else if (diff < -1 && result.discrepanciesFlagged > 0) {
+                    pendingNotes.push(
+                      `${ym}: database is ₹${Math.round(-diff).toLocaleString("en-IN")} below file — expected, rows are pending approval`
+                    );
+                  } else if (diff < -1) {
+                    ghostWarnings.push(
+                      `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} is BELOW file ₹${Math.round(f.net).toLocaleString("en-IN")} (−₹${Math.round(-diff).toLocaleString("en-IN")}) — rows missing from database`
+                    );
+                  }
+                }
+
+                if (ghostWarnings.length > 0) {
+                  summary += `\n\n🔴 RECONCILIATION MISMATCH — database does not match your file:\n${ghostWarnings.join("\n")}\n\nLikely cause: a previously uploaded row was edited or removed in the file, leaving a stale copy in the database. Contact admin to investigate.`;
+                  setMessageType("error");
+                } else {
+                  summary += `\n\n✓ Reconciled: database matches file totals for ${monthKeys.join(", ")}.`;
+                  if (pendingNotes.length > 0) {
+                    summary += `\n${pendingNotes.join("\n")}`;
+                  }
+                }
+              }
+            } catch (reconErr) {
+              summary += `\n\n(Reconciliation check could not run: ${reconErr.message})`;
+            }
+
             setMessage(summary);
-            setMessageType("success");
+            if (messageType !== "error") setMessageType("success");
             setLoading(false);
-            setTimeout(() => router.push("/dashboard"), 3500);
+            // Stay on the page if reconciliation failed so the warning is readable
+            setTimeout(() => {
+              setMessage((current) => {
+                if (!current.includes("🔴")) router.push("/dashboard");
+                return current;
+              });
+            }, 4000);
           } catch (err) {
             setMessage(`❌ Error: ${err.message}`);
             setMessageType("error");
