@@ -10,6 +10,10 @@ function normDate(d) {
   return String(d).split("T")[0];
 }
 
+function normStr(v) {
+  return String(v ?? "").trim();
+}
+
 function isClose(a, b, epsilon = 0.01) {
   const numA = parseFloat(a);
   const numB = parseFloat(b);
@@ -54,7 +58,7 @@ export default async function handler(req, res) {
 
     try {
       // ---------- 1. Fetch existing rows sharing an invoice number ----------
-      const invoiceNumbers = [...new Set(records.map((r) => r.system_invoice_number).filter(Boolean))];
+      const invoiceNumbers = [...new Set(records.map((r) => normStr(r.system_invoice_number)).filter(Boolean))];
 
       let existingRows = [];
       if (invoiceNumbers.length > 0) {
@@ -70,7 +74,7 @@ export default async function handler(req, res) {
 
       const existingMap = {};
       for (const row of existingRows) {
-        const key = `${row.system_invoice_number}|${row.serial_number}|${row.quantity}`;
+        const key = `${normStr(row.system_invoice_number)}|${normStr(row.serial_number)}|${row.quantity}`;
         existingMap[key] = row;
       }
 
@@ -81,7 +85,7 @@ export default async function handler(req, res) {
       const seenInBatch = new Set();
 
       for (const r of records) {
-        const key = `${r.system_invoice_number}|${r.serial_number}|${r.quantity}`;
+        const key = `${normStr(r.system_invoice_number)}|${normStr(r.serial_number)}|${r.quantity}`;
 
         if (seenInBatch.has(key)) {
           duplicateCount++;
@@ -108,23 +112,21 @@ export default async function handler(req, res) {
       }
 
       // ---------- 3. Serial-reuse check (model + serial scoped) ----------
-      // A +1 sale of a model+serial whose net position is already >= 1
-      // (i.e. sold and not returned) goes to the approval queue.
-      const serials = [...new Set(candidates.map((r) => (r.serial_number || "").trim()).filter(Boolean))];
+      const serials = [...new Set(candidates.map((r) => normStr(r.serial_number)).filter(Boolean))];
 
       const positions = {}; // "model|serial" -> net quantity currently in DB
 
       if (serials.length > 0) {
         const { data: serialRows, error: serialError } = await supabase
           .from("sales_master")
-          .select("model_number, serial_number, quantity, transaction_date, system_invoice_number, net_value")
+          .select("model_number, serial_number, quantity")
           .eq("store_code", storeCode)
           .in("serial_number", serials);
 
         if (serialError) throw serialError;
 
         for (const row of serialRows || []) {
-          const k = `${row.model_number}|${row.serial_number}`;
+          const k = `${normStr(row.model_number)}|${normStr(row.serial_number)}`;
           positions[k] = (positions[k] || 0) + (row.quantity || 0);
         }
       }
@@ -137,7 +139,7 @@ export default async function handler(req, res) {
       const toInsert = [];
 
       for (const r of sorted) {
-        const serial = (r.serial_number || "").trim();
+        const serial = normStr(r.serial_number);
 
         // Rows without a serial (e.g. some returns) skip this check
         if (!serial) {
@@ -145,11 +147,10 @@ export default async function handler(req, res) {
           continue;
         }
 
-        const k = `${r.model_number}|${serial}`;
+        const k = `${normStr(r.model_number)}|${serial}`;
         const pos = positions[k] || 0;
 
         if (r.quantity > 0 && pos >= 1) {
-          // Same model+serial already sold and not returned - needs admin approval
           toFlag.push({ type: "serial_reuse", existing: null, incoming: r });
           continue;
         }
@@ -166,10 +167,10 @@ export default async function handler(req, res) {
             toInsert.map((r) => ({
               store_code: r.store_code,
               transaction_date: r.transaction_date,
-              system_invoice_number: r.system_invoice_number,
-              model_number: r.model_number,
+              system_invoice_number: normStr(r.system_invoice_number),
+              model_number: normStr(r.model_number),
               quantity: r.quantity,
-              serial_number: r.serial_number,
+              serial_number: normStr(r.serial_number),
               mrp: r.mrp,
               net_value: r.net_value,
               discount_value: r.discount_value,
@@ -178,7 +179,7 @@ export default async function handler(req, res) {
               family: r.family,
               calibre: r.calibre,
               customer_name: r.customer_name,
-              mobile_number: r.mobile_number,
+              mobile_number: normStr(r.mobile_number),
               upload_id: uploadLog.id,
             }))
           );
@@ -195,9 +196,9 @@ export default async function handler(req, res) {
               upload_id: uploadLog.id,
               store_code: storeCode,
               transaction_date: existing ? existing.transaction_date : incoming.transaction_date,
-              system_invoice_number: incoming.system_invoice_number,
-              model_number: incoming.model_number,
-              serial_number: incoming.serial_number,
+              system_invoice_number: normStr(incoming.system_invoice_number),
+              model_number: normStr(incoming.model_number),
+              serial_number: normStr(incoming.serial_number),
               field_changed: type, // 'full_record' or 'serial_reuse'
               old_value: existing ? JSON.stringify(existing) : null,
               new_value: JSON.stringify(incoming),
