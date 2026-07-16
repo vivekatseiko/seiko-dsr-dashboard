@@ -54,26 +54,9 @@ export default function Approvals() {
   const [filter, setFilter] = useState("pending");
   const [actionLoading, setActionLoading] = useState(null);
 
-  const [stores, setStores] = useState([]);
-  const [exportStore, setExportStore] = useState("all");
-  const [exportStart, setExportStart] = useState("");
-  const [exportEnd, setExportEnd] = useState("");
-
   useEffect(() => {
     fetchData();
   }, [filter]);
-
-  useEffect(() => {
-    // Store list for the export filter
-    fetch("/api/targets")
-      .then((r) => r.json())
-      .then((result) => {
-        const data = result.data || [];
-        const uniqueStores = [...new Set(data.map((t) => t.store_code))].sort();
-        setStores(uniqueStores);
-      })
-      .catch(() => {});
-  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -112,71 +95,9 @@ export default function Approvals() {
     }
   };
 
-  const handleDownload = () => {
-    const params = new URLSearchParams();
-    if (exportStore !== "all") params.append("storeCode", exportStore);
-    if (exportStart) params.append("startDate", exportStart);
-    if (exportEnd) params.append("endDate", exportEnd);
-    window.location.href = `/api/sales-export?${params.toString()}`;
-  };
-
   return (
     <div className={styles.container}>
       <h1>✅ Approvals</h1>
-
-      {/* Download Master Sales Data */}
-      <div style={{
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        padding: "1rem 1.5rem",
-        borderRadius: "12px",
-        marginBottom: "2rem",
-        display: "flex",
-        gap: "1rem",
-        alignItems: "center",
-        flexWrap: "wrap",
-      }}>
-        <span style={{ color: "white", fontWeight: "600", fontSize: "13px" }}>
-          📥 Download Master Sales Data
-        </span>
-        <select
-          value={exportStore}
-          onChange={(e) => setExportStore(e.target.value)}
-          style={{ padding: "0.5rem", borderRadius: "6px", border: "none", fontSize: "12px" }}
-        >
-          <option value="all">All Stores</option>
-          {stores.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        <input
-          type="date"
-          value={exportStart}
-          onChange={(e) => setExportStart(e.target.value)}
-          style={{ padding: "0.5rem", borderRadius: "6px", border: "none", fontSize: "12px" }}
-        />
-        <input
-          type="date"
-          value={exportEnd}
-          onChange={(e) => setExportEnd(e.target.value)}
-          style={{ padding: "0.5rem", borderRadius: "6px", border: "none", fontSize: "12px" }}
-        />
-        <button
-          onClick={handleDownload}
-          style={{
-            padding: "0.5rem 1rem",
-            backgroundColor: "rgba(255,255,255,0.2)",
-            color: "white",
-            border: "1px solid rgba(255,255,255,0.3)",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "12px",
-            fontWeight: "600",
-            marginLeft: "auto",
-          }}
-        >
-          Download CSV
-        </button>
-      </div>
 
       <div className={styles.filterBar}>
         <select
