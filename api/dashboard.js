@@ -68,43 +68,38 @@ export default async function handler(req, res) {
     }
 
     // Previous-period averages: daily MRP totals, averaged over days that had sales,
-    // weekdays and weekends separately. Requires >= 80% of period days present.
+    // weekdays and weekends separately.
     let historicalWeekdayAvg = null;
     let historicalWeekendAvg = null;
 
     if (historicalData && historicalData.length > 0) {
-      const historicalDatesCount = new Set(historicalData.map((r) => r.transaction_date)).size;
-      const minRequiredDates = Math.ceil(periodLengthDays * 0.8 * (25 / 30)); // ~80% of typical selling days
-
-      if (historicalDatesCount >= Math.min(minRequiredDates, historicalDatesCount)) {
-        // Group MRP by day first
-        const dailyMrp = {};
-        for (const record of historicalData) {
-          const d = record.transaction_date;
-          dailyMrp[d] = (dailyMrp[d] || 0) + parseFloat(record.mrp || 0);
-        }
-
-        const weekdayTotals = [];
-        const weekendTotals = [];
-
-        for (const [dateStr, total] of Object.entries(dailyMrp)) {
-          const dow = new Date(dateStr + "T00:00:00").getDay();
-          if (dow === 0 || dow === 6) {
-            weekendTotals.push(total);
-          } else {
-            weekdayTotals.push(total);
-          }
-        }
-
-        historicalWeekdayAvg =
-          weekdayTotals.length > 0
-            ? weekdayTotals.reduce((a, b) => a + b, 0) / weekdayTotals.length
-            : null;
-        historicalWeekendAvg =
-          weekendTotals.length > 0
-            ? weekendTotals.reduce((a, b) => a + b, 0) / weekendTotals.length
-            : null;
+      // Group MRP by day first
+      const dailyMrp = {};
+      for (const record of historicalData) {
+        const d = record.transaction_date;
+        dailyMrp[d] = (dailyMrp[d] || 0) + parseFloat(record.mrp || 0);
       }
+
+      const weekdayTotals = [];
+      const weekendTotals = [];
+
+      for (const [dateStr, total] of Object.entries(dailyMrp)) {
+        const dow = new Date(dateStr + "T00:00:00").getDay();
+        if (dow === 0 || dow === 6) {
+          weekendTotals.push(total);
+        } else {
+          weekdayTotals.push(total);
+        }
+      }
+
+      historicalWeekdayAvg =
+        weekdayTotals.length > 0
+          ? weekdayTotals.reduce((a, b) => a + b, 0) / weekdayTotals.length
+          : null;
+      historicalWeekendAvg =
+        weekendTotals.length > 0
+          ? weekendTotals.reduce((a, b) => a + b, 0) / weekendTotals.length
+          : null;
     }
 
     const historicalPeriod = { start: historicalStartStr, end: historicalEndStr };
@@ -120,6 +115,7 @@ export default async function handler(req, res) {
         store_name: "No Data",
         date: date,
         sales: 0,
+        mrp: 0,
         quantity: 0,
         discount: 0,
         dayOfWeek: new Date(date + "T00:00:00").getDay(),
@@ -202,12 +198,14 @@ export default async function handler(req, res) {
           store_name: storeName,
           date: date,
           sales: 0,
+          mrp: 0,
           quantity: 0,
           discount: 0,
           dayOfWeek: new Date(date + "T00:00:00").getDay(),
         };
       }
       dailyDataByStore[key].sales += netValue;
+      dailyDataByStore[key].mrp += mrpValue;
       dailyDataByStore[key].quantity += quantity;
       dailyDataByStore[key].discount += discountValue;
     }
@@ -229,6 +227,7 @@ export default async function handler(req, res) {
             store_name: storeMetrics[store]?.store_name || store,
             date: date,
             sales: 0,
+            mrp: 0,
             quantity: 0,
             discount: 0,
             dayOfWeek: new Date(date + "T00:00:00").getDay(),
