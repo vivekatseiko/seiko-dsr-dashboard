@@ -20,6 +20,10 @@ export default function Upload() {
   const [messageType, setMessageType] = useState("");
   const [fileType, setFileType] = useState("sales");
 
+  // Progress bar state
+  const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("");
+
   const [targets, setTargets] = useState([]);
   const [targetsLoading, setTargetsLoading] = useState(true);
   const [targetsError, setTargetsError] = useState("");
@@ -45,6 +49,11 @@ export default function Upload() {
       fetchTargets();
     }
   }, [activeTab, filterStore, filterMonth, filterYear]);
+
+  const setStage = (percent, label) => {
+    setProgress(percent);
+    setProgressLabel(label);
+  };
 
   const fetchTargets = async () => {
     setTargetsLoading(true);
@@ -148,7 +157,8 @@ export default function Upload() {
 
   const handleTargetFileUpload = async (file) => {
     setLoading(true);
-    setMessage("Reading target file...");
+    setStage(5, "Reading target file...");
+    setMessage("");
     setMessageType("info");
 
     try {
@@ -165,12 +175,11 @@ export default function Upload() {
 
         script.onload = async () => {
           try {
+            setStage(25, "Parsing target data...");
             const XLSX = window.XLSX;
             const workbook = XLSX.read(event.target.result, { type: "array" });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-
-            setMessage("Parsing target data...");
 
             const targetRecords = [];
 
@@ -192,11 +201,11 @@ export default function Upload() {
                 target_month: month,
                 target_year: year,
                 value_target: valueTarget,
-                calibre_1_name: row[5] || null,
+                calibre_1_name: row[5] ? row[5].toString() : null,
                 calibre_1_qty_target: row[6] ? parseInt(row[6]) : null,
-                calibre_2_name: row[7] || null,
+                calibre_2_name: row[7] ? row[7].toString() : null,
                 calibre_2_qty_target: row[8] ? parseInt(row[8]) : null,
-                calibre_3_name: row[9] || null,
+                calibre_3_name: row[9] ? row[9].toString() : null,
                 calibre_3_qty_target: row[10] ? parseInt(row[10]) : null,
               });
             }
@@ -208,7 +217,7 @@ export default function Upload() {
               return;
             }
 
-            setMessage(`Found ${targetRecords.length} target records. Uploading...`);
+            setStage(60, `Uploading ${targetRecords.length} target records...`);
 
             const userEmail = localStorage.getItem("userEmail") || "unknown";
 
@@ -227,6 +236,7 @@ export default function Upload() {
               return;
             }
 
+            setStage(100, "Done");
             setMessage(`✅ Uploaded ${result.recordsInserted} target records`);
             setMessageType("success");
             setLoading(false);
@@ -254,12 +264,14 @@ export default function Upload() {
 
   const handleSalesFileUpload = async (file) => {
     setLoading(true);
-    setMessage("Reading Excel file...");
+    setStage(5, "Reading file...");
+    setMessage("");
     setMessageType("info");
 
     try {
       const reader = new FileReader();
       reader.onload = async (event) => {
+        setStage(12, "Loading Excel library...");
         const script = document.createElement("script");
         script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
 
@@ -274,21 +286,28 @@ export default function Upload() {
             const XLSX = window.XLSX;
             const workbook = XLSX.read(event.target.result, { type: "array" });
 
-            setMessage(`Found ${workbook.SheetNames.length} sheets. Processing...`);
-
             const allRecords = [];
             const rejectedRows = [];
             let processedSheets = 0;
             let skippedSheets = 0;
 
+            const totalSheets = workbook.SheetNames.length;
+            let sheetIdx = 0;
+
             for (const sheetName of workbook.SheetNames) {
+              sheetIdx++;
+              // Parsing occupies 15% - 60% of the bar, split across sheets
+              setStage(
+                15 + Math.round((sheetIdx / totalSheets) * 45),
+                `Parsing sheet ${sheetIdx}/${totalSheets}: ${sheetName}`
+              );
+
               try {
                 const sheet = workbook.Sheets[sheetName];
 
                 const sheetStoreCode = findStoreCode(sheet, XLSX);
 
                 if (!sheetStoreCode) {
-                  console.log(`Skipping "${sheetName}" - no valid store code found in top rows`);
                   skippedSheets++;
                   continue;
                 }
@@ -317,7 +336,6 @@ export default function Upload() {
                 }
 
                 if (headerRowIndex === -1) {
-                  console.log(`Skipping "${sheetName}" - no Date column found`);
                   skippedSheets++;
                   continue;
                 }
@@ -334,13 +352,11 @@ export default function Upload() {
                 }
 
                 if (!parseDate(dataRows[0][dateColumnIndex])) {
-                  console.log(`Skipping "${sheetName}" - invalid date format`);
                   skippedSheets++;
                   continue;
                 }
 
                 processedSheets++;
-                console.log(`Processing "${sheetName}" (${sheetStoreCode}) - ${dataRows.length} rows`);
 
                 for (const row of dataRows) {
                   const transactionDate = parseDate(row[dateColumnIndex]);
@@ -353,21 +369,21 @@ export default function Upload() {
                     rejectedRows.push({
                       sheet: sheetName,
                       date: transactionDate,
-                      model: row[2] || "",
-                      serial: row[4] || "",
+                      model: (row[2] ?? "").toString(),
+                      serial: (row[4] ?? "").toString(),
                       reason: `Qty is ${quantity} — each unit must be its own row with its own serial number (qty 1, or -1 for a return)`,
                     });
                     continue;
                   }
 
                   // Invoice number is mandatory
-                  const invoiceNumber = (row[1] || "").toString().trim();
+                  const invoiceNumber = (row[1] ?? "").toString().trim();
                   if (!invoiceNumber) {
                     rejectedRows.push({
                       sheet: sheetName,
                       date: transactionDate,
-                      model: row[2] || "",
-                      serial: row[4] || "",
+                      model: (row[2] ?? "").toString(),
+                      serial: (row[4] ?? "").toString(),
                       reason: "Missing invoice number",
                     });
                     continue;
@@ -389,8 +405,8 @@ export default function Upload() {
                     rejectedRows.push({
                       sheet: sheetName,
                       date: transactionDate,
-                      model: row[2] || "",
-                      serial: row[4] || "",
+                      model: (row[2] ?? "").toString(),
+                      serial: (row[4] ?? "").toString(),
                       reason: `Discount mismatch: file says ${fileDiscount.toFixed(0)}, but MRP(${mrp.toFixed(0)}) - Net(${netValue.toFixed(0)}) = ${discountValue.toFixed(0)}`,
                     });
                     continue;
@@ -400,18 +416,18 @@ export default function Upload() {
                     store_code: sheetStoreCode,
                     transaction_date: transactionDate,
                     system_invoice_number: invoiceNumber,
-                    model_number: row[2] || "",
+                    model_number: (row[2] ?? "").toString().trim(),
                     quantity: quantity,
-                    serial_number: row[4] || "",
+                    serial_number: (row[4] ?? "").toString().trim(),
                     mrp: mrp,
                     net_value: netValue,
                     discount_value: parseFloat(discountValue.toFixed(2)),
                     discount_percentage: parseFloat(discountPercentage.toFixed(2)),
-                    sold_by: row[9] || "",
-                    family: row[11] || "",
-                    calibre: row[12] || "",
-                    customer_name: row[16] || "",
-                    mobile_number: row[17] || "",
+                    sold_by: (row[9] ?? "").toString().trim(),
+                    family: (row[11] ?? "").toString().trim(),
+                    calibre: (row[12] ?? "").toString().trim(),
+                    customer_name: (row[16] ?? "").toString().trim(),
+                    mobile_number: (row[17] ?? "").toString().trim(),
                   });
                 }
               } catch (err) {
@@ -445,7 +461,7 @@ export default function Upload() {
               return;
             }
 
-            setMessage(`Found ${allRecords.length} records from ${processedSheets} sheet(s). Uploading...`);
+            setStage(65, `Uploading ${allRecords.length} records to server...`);
 
             const userEmail = localStorage.getItem("userEmail") || "unknown";
             const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
@@ -478,10 +494,11 @@ export default function Upload() {
             }
 
             // ---- Reconciliation: compare file totals vs database totals per month ----
+            setStage(85, "Reconciling database against file...");
             try {
               const fileTotals = {};
               for (const r of allRecords) {
-                const ym = r.transaction_date.substring(0, 7); // "2026-06"
+                const ym = r.transaction_date.substring(0, 7);
                 if (!fileTotals[ym]) {
                   fileTotals[ym] = { net: 0, mrp: 0, rows: 0 };
                 }
@@ -508,7 +525,6 @@ export default function Upload() {
                   const diff = d.total_net - f.net;
 
                   if (diff > 1) {
-                    // Database holds MORE than the file: ghost rows from earlier uploads
                     ghostWarnings.push(
                       `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} vs file ₹${Math.round(f.net).toLocaleString("en-IN")} (+₹${Math.round(diff).toLocaleString("en-IN")}, ${d.row_count - f.rows} extra row(s))`
                     );
@@ -525,7 +541,11 @@ export default function Upload() {
 
                 if (ghostWarnings.length > 0) {
                   summary += `\n\n🔴 RECONCILIATION MISMATCH — database does not match your file:\n${ghostWarnings.join("\n")}\n\nLikely cause: a previously uploaded row was edited or removed in the file, leaving a stale copy in the database. Contact admin to investigate.`;
+                  setStage(100, "Done - with warnings");
+                  setMessage(summary);
                   setMessageType("error");
+                  setLoading(false);
+                  return;
                 } else {
                   summary += `\n\n✓ Reconciled: database matches file totals for ${monthKeys.join(", ")}.`;
                   if (pendingNotes.length > 0) {
@@ -537,16 +557,11 @@ export default function Upload() {
               summary += `\n\n(Reconciliation check could not run: ${reconErr.message})`;
             }
 
+            setStage(100, "Done");
             setMessage(summary);
-            if (messageType !== "error") setMessageType("success");
+            setMessageType("success");
             setLoading(false);
-            // Stay on the page if reconciliation failed so the warning is readable
-            setTimeout(() => {
-              setMessage((current) => {
-                if (!current.includes("🔴")) router.push("/dashboard");
-                return current;
-              });
-            }, 4000);
+            setTimeout(() => router.push("/dashboard"), 3500);
           } catch (err) {
             setMessage(`❌ Error: ${err.message}`);
             setMessageType("error");
@@ -574,6 +589,9 @@ export default function Upload() {
     } else {
       handleTargetFileUpload(file);
     }
+
+    // allow re-selecting the same file
+    e.target.value = "";
   };
 
   return (
@@ -608,6 +626,31 @@ export default function Upload() {
           🎯 Manage Targets
         </button>
       </div>
+
+      {/* Progress bar */}
+      {loading && (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.35rem" }}>
+            <span style={{ fontSize: "12px", color: "#374151", fontWeight: "600" }}>{progressLabel}</span>
+            <span style={{ fontSize: "12px", color: "#6b7280" }}>{progress}%</span>
+          </div>
+          <div style={{
+            width: "100%",
+            height: "10px",
+            backgroundColor: "#e5e7eb",
+            borderRadius: "6px",
+            overflow: "hidden",
+          }}>
+            <div style={{
+              width: `${progress}%`,
+              height: "100%",
+              backgroundColor: "#2196F3",
+              borderRadius: "6px",
+              transition: "width 0.3s ease",
+            }} />
+          </div>
+        </div>
+      )}
 
       {message && (
         <div
