@@ -118,11 +118,12 @@ export default function Dashboard() {
         date: record.date,
         formattedDate: formatDate(record.date),
         sales: record.sales,
+        mrp: record.mrp || 0,
         quantity: record.quantity,
         discount: record.discount,
         isWeekend: isWeekend,
         dayOfWeek: record.dayOfWeek,
-        // 1 on a hidden 0-1 axis: full-height background band without touching the sales scale
+        // 1 on a hidden 0-1 axis: full-height background band without touching the MRP scale
         weekendBand: isWeekend ? 1 : 0,
       });
     }
@@ -225,43 +226,45 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Historical Averages */}
+      {/* Previous Period Averages */}
       {(data.historicalWeekdayAvg !== null || data.historicalWeekendAvg !== null) && (
         <div style={{
           marginTop: "2rem",
           padding: "1rem",
           backgroundColor: "#f0f0f0",
           borderRadius: "8px",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "1rem",
         }}>
-          {data.historicalWeekdayAvg !== null && (
-            <div>
-              <p style={{ margin: "0 0 0.5rem 0", fontWeight: "bold" }}>Historical Weekday Avg</p>
-              <p style={{ margin: 0, fontSize: "1.2rem" }}>₹{formatIndianNumber(Math.round(data.historicalWeekdayAvg / 100000))}L</p>
-            </div>
-          )}
-          {data.historicalWeekendAvg !== null && (
-            <div>
-              <p style={{ margin: "0 0 0.5rem 0", fontWeight: "bold" }}>Historical Weekend Avg</p>
-              <p style={{ margin: 0, fontSize: "1.2rem" }}>₹{formatIndianNumber(Math.round(data.historicalWeekendAvg / 100000))}L</p>
-            </div>
-          )}
+          <p style={{ margin: "0 0 0.75rem 0", fontSize: "12px", color: "#666" }}>
+            📊 Previous period comparison ({data.historicalPeriod?.start} to {data.historicalPeriod?.end}) — average daily MRP value, over days with sales
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem" }}>
+            {data.historicalWeekdayAvg !== null && (
+              <div>
+                <p style={{ margin: "0 0 0.5rem 0", fontWeight: "bold" }}>Prev. Period Weekday Avg</p>
+                <p style={{ margin: 0, fontSize: "1.2rem" }}>₹{(data.historicalWeekdayAvg / 100000).toFixed(2)}L / day</p>
+              </div>
+            )}
+            {data.historicalWeekendAvg !== null && (
+              <div>
+                <p style={{ margin: "0 0 0.5rem 0", fontWeight: "bold" }}>Prev. Period Weekend Avg</p>
+                <p style={{ margin: 0, fontSize: "1.2rem" }}>₹{(data.historicalWeekendAvg / 100000).toFixed(2)}L / day</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Charts */}
       {Recharts && Object.keys(chartDataByStore).length > 0 && (
         <div style={{ marginTop: "2rem" }}>
-          <h2>Daily Sales Trend (by Store)</h2>
+          <h2>Daily Sales Trend (by Store) — MRP Value</h2>
           {Object.entries(chartDataByStore).map(([store, trendData], storeIdx) => {
-            // Y axis scales to THIS store's sales, never the weekend band
-            const salesValues = trendData.map((d) => d.sales || 0);
+            // Y axis scales to this store's daily MRP plus the reference lines
+            const mrpValues = trendData.map((d) => d.mrp || 0);
             const refLines = [data.historicalWeekdayAvg, data.historicalWeekendAvg].filter(
               (v) => v !== null && v !== undefined
             );
-            const maxY = Math.max(...salesValues, ...refLines, 1) * 1.15;
+            const maxY = Math.max(...mrpValues, ...refLines, 1) * 1.15;
 
             return (
               <div key={store} style={{ marginTop: "2rem", overflowX: "auto" }}>
@@ -283,14 +286,14 @@ export default function Dashboard() {
                     textAnchor="end"
                     height={80}
                   />
-                  {/* Left axis: sales, scaled to this store's data */}
+                  {/* Left axis: daily MRP, scaled to this store's data */}
                   <Recharts.YAxis
                     yAxisId="sales"
                     tickFormatter={formatYAxisValue}
                     domain={[0, maxY]}
                     allowDataOverflow={false}
                   />
-                  {/* Hidden axis for the weekend band: 0 to 1 so the band always fills full height */}
+                  {/* Hidden axis for the weekend band: always full height */}
                   <Recharts.YAxis yAxisId="band" hide domain={[0, 1]} />
                   <Recharts.Tooltip
                     content={({ active, payload }) => {
@@ -306,7 +309,8 @@ export default function Dashboard() {
                             fontSize: "12px",
                           }}>
                             <p style={{ margin: 0 }}>📅 Date: {d.date}</p>
-                            <p style={{ margin: 0 }}>💰 Sales: ₹{formatIndianNumber(Math.round(d.sales / 100000))}L</p>
+                            <p style={{ margin: 0 }}>💰 MRP Value: ₹{(d.mrp / 100000).toFixed(2)}L</p>
+                            <p style={{ margin: 0 }}>💵 Net Value: ₹{(d.sales / 100000).toFixed(2)}L</p>
                             <p style={{ margin: 0 }}>📦 Qty: {formatIndianNumber(d.quantity)}</p>
                             <p style={{ margin: 0 }}>{dayType}</p>
                           </div>
@@ -327,13 +331,13 @@ export default function Dashboard() {
                     isAnimationActive={false}
                   />
 
-                  {/* Sales line */}
+                  {/* Daily MRP line */}
                   <Recharts.Line
                     yAxisId="sales"
                     type="monotone"
-                    dataKey="sales"
+                    dataKey="mrp"
                     stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]}
-                    name={`${store} Sales`}
+                    name={`${store} Daily MRP`}
                     connectNulls={false}
                     dot={(props) => {
                       const { cx, cy, payload } = props;
@@ -345,7 +349,7 @@ export default function Dashboard() {
                     }}
                   />
 
-                  {/* Historical Weekday Average Line */}
+                  {/* Previous Period Weekday Average Line (MRP) */}
                   {data.historicalWeekdayAvg !== null && (
                     <Recharts.ReferenceLine
                       yAxisId="sales"
@@ -356,7 +360,7 @@ export default function Dashboard() {
                     />
                   )}
 
-                  {/* Historical Weekend Average Line */}
+                  {/* Previous Period Weekend Average Line (MRP) */}
                   {data.historicalWeekendAvg !== null && (
                     <Recharts.ReferenceLine
                       yAxisId="sales"
@@ -372,8 +376,12 @@ export default function Dashboard() {
                   <span>🔵 Weekday (small dot)</span>
                   <span>🔵 Weekend (large dot)</span>
                   <span style={{ backgroundColor: "#ffb366", opacity: 0.5, padding: "2px 6px", borderRadius: "3px" }}>Weekend background</span>
-                  {data.historicalWeekdayAvg !== null && <span>— Weekday Avg (5px dash)</span>}
-                  {data.historicalWeekendAvg !== null && <span>— Weekend Avg (10px dash)</span>}
+                  {data.historicalWeekdayAvg !== null && (
+                    <span>— — Weekday Avg ₹{(data.historicalWeekdayAvg / 100000).toFixed(2)}L (previous period: {data.historicalPeriod?.start} to {data.historicalPeriod?.end})</span>
+                  )}
+                  {data.historicalWeekendAvg !== null && (
+                    <span>— — Weekend Avg ₹{(data.historicalWeekendAvg / 100000).toFixed(2)}L (previous period)</span>
+                  )}
                 </div>
               </div>
             );
@@ -390,7 +398,8 @@ export default function Dashboard() {
               <tr>
                 <th>Date</th>
                 <th>Store</th>
-                <th>Sales</th>
+                <th>MRP Value</th>
+                <th>Net Value</th>
                 <th>Units</th>
                 <th>Discount</th>
                 <th>Type</th>
@@ -408,7 +417,8 @@ export default function Dashboard() {
                   >
                     <td>{formatDate(day.date)}</td>
                     <td>{day.store_code}</td>
-                    <td>₹{formatIndianNumber(Math.round(day.sales / 100000))}L</td>
+                    <td>₹{((day.mrp || 0) / 100000).toFixed(2)}L</td>
+                    <td>₹{(day.sales / 100000).toFixed(2)}L</td>
                     <td>{formatIndianNumber(day.quantity)}</td>
                     <td>₹{formatIndianNumber(Math.round(day.discount / 10000))}K</td>
                     <td>{dayType}</td>
@@ -430,7 +440,8 @@ export default function Dashboard() {
                 <th>Store</th>
                 <th>City</th>
                 <th>Region</th>
-                <th>Sales</th>
+                <th>MRP Value</th>
+                <th>Net Value</th>
                 <th>Units</th>
                 <th>Discount</th>
                 <th>Avg Disc %</th>
@@ -443,7 +454,8 @@ export default function Dashboard() {
                   <td>{store.store_name}</td>
                   <td>{store.city}</td>
                   <td>{store.region}</td>
-                  <td>₹{formatIndianNumber(Math.round(store.sales / 100000))}L</td>
+                  <td>₹{((store.mrp || 0) / 100000).toFixed(2)}L</td>
+                  <td>₹{(store.sales / 100000).toFixed(2)}L</td>
                   <td>{formatIndianNumber(store.quantity)}</td>
                   <td>₹{formatIndianNumber(Math.round(store.discount / 10000))}K</td>
                   <td>{store.discount_percent.toFixed(2)}%</td>
