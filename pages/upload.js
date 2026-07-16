@@ -19,11 +19,13 @@ export default function Upload() {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   const [fileType, setFileType] = useState("sales");
+  const [userRole, setUserRole] = useState("");
 
   // Progress bar state
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState("");
 
+  // Targets state
   const [targets, setTargets] = useState([]);
   const [targetsLoading, setTargetsLoading] = useState(true);
   const [targetsError, setTargetsError] = useState("");
@@ -32,6 +34,11 @@ export default function Upload() {
   const [filterYear, setFilterYear] = useState("all");
   const [stores, setStores] = useState([]);
   const [years, setYears] = useState([]);
+
+  // Download state
+  const [exportStore, setExportStore] = useState("all");
+  const [exportStart, setExportStart] = useState("");
+  const [exportEnd, setExportEnd] = useState("");
 
   const VALID_STORE_CODES = [
     "SBTEXACHN", "SBTFALBLR", "SBTSCMKOL", "SBTBRVMUM", "SBTDLFNOI",
@@ -43,6 +50,10 @@ export default function Upload() {
   ];
 
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
+
+  useEffect(() => {
+    setUserRole(localStorage.getItem("userRole") || "");
+  }, []);
 
   useEffect(() => {
     if (activeTab === "targets") {
@@ -153,6 +164,14 @@ export default function Upload() {
       }
     }
     return null;
+  };
+
+  const handleDownload = () => {
+    const params = new URLSearchParams();
+    if (exportStore !== "all") params.append("storeCode", exportStore);
+    if (exportStart) params.append("startDate", exportStart);
+    if (exportEnd) params.append("endDate", exportEnd);
+    window.location.href = `/api/sales-export?${params.toString()}`;
   };
 
   const handleTargetFileUpload = async (file) => {
@@ -296,7 +315,6 @@ export default function Upload() {
 
             for (const sheetName of workbook.SheetNames) {
               sheetIdx++;
-              // Parsing occupies 15% - 60% of the bar, split across sheets
               setStage(
                 15 + Math.round((sheetIdx / totalSheets) * 45),
                 `Parsing sheet ${sheetIdx}/${totalSheets}: ${sheetName}`
@@ -364,7 +382,7 @@ export default function Upload() {
 
                   if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
 
-                  // One row per physical unit: each row has one serial number
+                  // One row per physical unit
                   if (Math.abs(quantity) !== 1) {
                     rejectedRows.push({
                       sheet: sheetName,
@@ -394,7 +412,7 @@ export default function Upload() {
                   const discountValue = mrp - netValue;
                   const discountPercentage = mrp !== 0 ? (discountValue / mrp) * 100 : 0;
 
-                  // Cross-check against the file's own Discount Value column
+                  // Cross-check the file's own Discount Value column
                   const rawDisc = row[7];
                   const fileDiscount =
                     rawDisc === "" || rawDisc === null || rawDisc === undefined
@@ -436,7 +454,7 @@ export default function Upload() {
               }
             }
 
-            // Fail loudly on any bad row - nothing gets uploaded
+            // Fail loudly on any bad row
             if (rejectedRows.length > 0) {
               console.warn("Rejected rows:", rejectedRows);
               const detail = rejectedRows
@@ -490,10 +508,10 @@ export default function Upload() {
               summary += `\n${result.duplicatesSkipped} duplicate(s) skipped (already in database).`;
             }
             if (result.discrepanciesFlagged > 0) {
-              summary += `\n⚠ ${result.discrepanciesFlagged} row(s) conflict with existing data — awaiting approval on the Discrepancies page.`;
+              summary += `\n⚠ ${result.discrepanciesFlagged} row(s) conflict with existing data — awaiting approval on the Approvals page.`;
             }
 
-            // ---- Reconciliation: compare file totals vs database totals per month ----
+            // Reconciliation: file totals vs database totals per month
             setStage(85, "Reconciling database against file...");
             try {
               const fileTotals = {};
@@ -590,41 +608,34 @@ export default function Upload() {
       handleTargetFileUpload(file);
     }
 
-    // allow re-selecting the same file
     e.target.value = "";
   };
+
+  const tabStyle = (tab) => ({
+    padding: "10px 20px",
+    backgroundColor: activeTab === tab ? "#2196F3" : "transparent",
+    color: activeTab === tab ? "white" : "#333",
+    border: "none",
+    cursor: "pointer",
+    fontWeight: activeTab === tab ? "bold" : "normal",
+  });
 
   return (
     <div className={styles.container}>
       <h1>📤 Upload & Manage</h1>
 
       <div style={{ display: "flex", gap: "1rem", marginBottom: "2rem", borderBottom: "2px solid #ddd" }}>
-        <button
-          onClick={() => setActiveTab("sales")}
-          style={{
-            padding: "10px 20px",
-            backgroundColor: activeTab === "sales" ? "#2196F3" : "transparent",
-            color: activeTab === "sales" ? "white" : "#333",
-            border: "none",
-            cursor: "pointer",
-            fontWeight: activeTab === "sales" ? "bold" : "normal",
-          }}
-        >
+        <button onClick={() => setActiveTab("sales")} style={tabStyle("sales")}>
           📤 Upload Sales & Targets
         </button>
-        <button
-          onClick={() => setActiveTab("targets")}
-          style={{
-            padding: "10px 20px",
-            backgroundColor: activeTab === "targets" ? "#2196F3" : "transparent",
-            color: activeTab === "targets" ? "white" : "#333",
-            border: "none",
-            cursor: "pointer",
-            fontWeight: activeTab === "targets" ? "bold" : "normal",
-          }}
-        >
+        <button onClick={() => setActiveTab("targets")} style={tabStyle("targets")}>
           🎯 Manage Targets
         </button>
+        {userRole === "admin" && (
+          <button onClick={() => setActiveTab("download")} style={tabStyle("download")}>
+            📥 Download Data
+          </button>
+        )}
       </div>
 
       {/* Progress bar */}
@@ -678,6 +689,7 @@ export default function Upload() {
         </div>
       )}
 
+      {/* TAB 1: Upload */}
       {activeTab === "sales" && (
         <div>
           <div style={{ marginBottom: "1.5rem" }}>
@@ -744,6 +756,7 @@ export default function Upload() {
         </div>
       )}
 
+      {/* TAB 2: Manage Targets */}
       {activeTab === "targets" && (
         <div>
           <div
@@ -864,6 +877,92 @@ export default function Upload() {
               No targets found. Upload targets from the Upload Sales & Targets tab.
             </p>
           )}
+        </div>
+      )}
+
+      {/* TAB 3: Download Data (admin only) */}
+      {activeTab === "download" && userRole === "admin" && (
+        <div>
+          <div
+            style={{
+              backgroundColor: "#e3f2fd",
+              padding: "1rem",
+              borderRadius: "4px",
+              marginBottom: "1.5rem",
+              fontSize: "13px",
+              color: "#1565c0",
+            }}
+          >
+            <p>
+              📥 <strong>Consolidated Sales Data (CSV).</strong> Leave filters as-is to download
+              everything, or narrow by store and date range.
+            </p>
+          </div>
+
+          <div
+            style={{
+              backgroundColor: "#f5f5f5",
+              padding: "1.5rem",
+              borderRadius: "8px",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "1rem",
+              alignItems: "end",
+            }}
+          >
+            <div>
+              <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>Store</label>
+              <select
+                value={exportStore}
+                onChange={(e) => setExportStore(e.target.value)}
+                style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
+              >
+                <option value="all">All Stores</option>
+                {VALID_STORE_CODES.slice().sort().map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>From (optional)</label>
+              <input
+                type="date"
+                value={exportStart}
+                onChange={(e) => setExportStart(e.target.value)}
+                style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>To (optional)</label>
+              <input
+                type="date"
+                value={exportEnd}
+                onChange={(e) => setExportEnd(e.target.value)}
+                style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
+              />
+            </div>
+
+            <div>
+              <button
+                onClick={handleDownload}
+                style={{
+                  width: "100%",
+                  padding: "0.7rem 1rem",
+                  backgroundColor: "#2196F3",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  fontWeight: "600",
+                }}
+              >
+                📥 Download CSV
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
