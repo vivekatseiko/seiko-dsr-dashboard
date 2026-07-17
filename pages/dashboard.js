@@ -136,7 +136,7 @@ export default function Dashboard() {
   const combinedData = Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
 
   // Y axis: max across every store's daily MRP, plus reference lines when shown
-  const showRefLines = storeList.length === 1;
+  const showRefLines = storeList.length >= 1;
   const allValues = [];
   for (const row of combinedData) {
     for (const s of storeList) {
@@ -255,8 +255,7 @@ export default function Dashboard() {
           borderRadius: "8px",
         }}>
           <p style={{ margin: "0 0 0.75rem 0", fontSize: "12px", color: "#666" }}>
-            📊 Previous period comparison ({data.historicalPeriod?.start} to {data.historicalPeriod?.end}) — average daily MRP value, over days with sales
-            {!showRefLines && " — lines shown on the chart only when a single store is selected"}
+            📊 Previous period comparison ({data.historicalPeriod?.start} to {data.historicalPeriod?.end}) — average daily MRP per store, over days with sales
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem" }}>
             {data.historicalWeekdayAvg !== null && (
