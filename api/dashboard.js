@@ -53,7 +53,7 @@ export default async function handler(req, res) {
     // ---- Previous period (for average reference lines) ----
     let historicalQuery = supabase
       .from("sales_master")
-      .select("transaction_date, mrp, net_value, quantity")
+      .select("store_code, transaction_date, mrp, net_value, quantity")
       .gte("transaction_date", historicalStartStr)
       .lte("transaction_date", historicalEndStr);
 
@@ -67,23 +67,27 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: historicalError.message });
     }
 
-    // Previous-period averages: daily MRP totals, averaged over days that had sales,
-    // weekdays and weekends separately.
+    // Previous-period averages: each STORE-DAY with sales is one observation.
+    // Daily MRP is totalled per store per day, then averaged across those
+    // store-days (weekdays and weekends separately). With one store selected
+    // this is identical to that store's daily average; with many stores it
+    // reads as "an average store's daily MRP".
     let historicalWeekdayAvg = null;
     let historicalWeekendAvg = null;
 
     if (historicalData && historicalData.length > 0) {
-      // Group MRP by day first
-      const dailyMrp = {};
+      const storeDayMrp = {}; // "store|date" -> daily MRP total for that store
+
       for (const record of historicalData) {
-        const d = record.transaction_date;
-        dailyMrp[d] = (dailyMrp[d] || 0) + parseFloat(record.mrp || 0);
+        const key = `${record.store_code}|${record.transaction_date}`;
+        storeDayMrp[key] = (storeDayMrp[key] || 0) + parseFloat(record.mrp || 0);
       }
 
       const weekdayTotals = [];
       const weekendTotals = [];
 
-      for (const [dateStr, total] of Object.entries(dailyMrp)) {
+      for (const [key, total] of Object.entries(storeDayMrp)) {
+        const dateStr = key.split("|")[1];
         const dow = new Date(dateStr + "T00:00:00").getDay();
         if (dow === 0 || dow === 6) {
           weekendTotals.push(total);
@@ -244,7 +248,7 @@ export default async function handler(req, res) {
         store.mrp > 0 ? parseFloat(((store.discount / store.mrp) * 100).toFixed(2)) : 0;
     }
 
-    // Blended overall discount % (total discount / total MRP)
+    // Blended overall discount %
     const averageDiscount = totalMrp > 0 ? (totalDiscounts / totalMrp) * 100 : 0;
     const asp = totalQuantity > 0 ? Math.round(totalSales / totalQuantity) : 0;
 
