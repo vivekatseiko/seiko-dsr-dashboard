@@ -36,7 +36,7 @@ export default function Upload() {
   const [years, setYears] = useState([]);
 
   // Download state
-  const [exportStore, setExportStore] = useState("all");
+  const [exportStores, setExportStores] = useState([]); // empty = all stores
   const [exportStart, setExportStart] = useState("");
   const [exportEnd, setExportEnd] = useState("");
 
@@ -64,6 +64,12 @@ export default function Upload() {
   const setStage = (percent, label) => {
     setProgress(percent);
     setProgressLabel(label);
+  };
+
+  const toggleExportStore = (code) => {
+    setExportStores((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
+    );
   };
 
   const fetchTargets = async () => {
@@ -168,7 +174,7 @@ export default function Upload() {
 
   const handleDownload = () => {
     const params = new URLSearchParams();
-    if (exportStore !== "all") params.append("storeCode", exportStore);
+    if (exportStores.length > 0) params.append("storeCodes", exportStores.join(","));
     if (exportStart) params.append("startDate", exportStart);
     if (exportEnd) params.append("endDate", exportEnd);
     window.location.href = `/api/sales-export?${params.toString()}`;
@@ -454,7 +460,7 @@ export default function Upload() {
               }
             }
 
-            // Fail loudly on any bad row
+            // Fail loudly on any bad row - nothing gets uploaded
             if (rejectedRows.length > 0) {
               console.warn("Rejected rows:", rejectedRows);
               const detail = rejectedRows
@@ -894,73 +900,93 @@ export default function Upload() {
             }}
           >
             <p>
-              📥 <strong>Consolidated Sales Data (CSV).</strong> Leave filters as-is to download
-              everything, or narrow by store and date range.
+              📥 <strong>Consolidated Sales Data (CSV).</strong> Tick stores to include —
+              leave all unticked to download every store. Dates optional.
             </p>
           </div>
 
-          <div
-            style={{
-              backgroundColor: "#f5f5f5",
-              padding: "1.5rem",
-              borderRadius: "8px",
+          <div style={{ backgroundColor: "#f5f5f5", padding: "1.5rem", borderRadius: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+              <label style={{ fontSize: "13px", fontWeight: "600" }}>
+                Stores {exportStores.length > 0 ? `(${exportStores.length} selected)` : "(all)"}
+              </label>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button
+                  onClick={() => setExportStores([...VALID_STORE_CODES])}
+                  style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #ccc", borderRadius: "4px", cursor: "pointer", backgroundColor: "white" }}
+                >
+                  Select all
+                </button>
+                <button
+                  onClick={() => setExportStores([])}
+                  style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #ccc", borderRadius: "4px", cursor: "pointer", backgroundColor: "white" }}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-              gap: "1rem",
-              alignItems: "end",
-            }}
-          >
-            <div>
-              <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>Store</label>
-              <select
-                value={exportStore}
-                onChange={(e) => setExportStore(e.target.value)}
-                style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
-              >
-                <option value="all">All Stores</option>
-                {VALID_STORE_CODES.slice().sort().map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+              gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+              gap: "0.4rem",
+              maxHeight: "220px",
+              overflowY: "auto",
+              backgroundColor: "white",
+              border: "1px solid #ddd",
+              borderRadius: "6px",
+              padding: "0.75rem",
+              marginBottom: "1.25rem",
+            }}>
+              {VALID_STORE_CODES.slice().sort().map((code) => (
+                <label key={code} style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "12px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={exportStores.includes(code)}
+                    onChange={() => toggleExportStore(code)}
+                  />
+                  {code}
+                </label>
+              ))}
             </div>
 
-            <div>
-              <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>From (optional)</label>
-              <input
-                type="date"
-                value={exportStart}
-                onChange={(e) => setExportStart(e.target.value)}
-                style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>To (optional)</label>
-              <input
-                type="date"
-                value={exportEnd}
-                onChange={(e) => setExportEnd(e.target.value)}
-                style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
-              />
-            </div>
-
-            <div>
-              <button
-                onClick={handleDownload}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem 1rem",
-                  backgroundColor: "#2196F3",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                  fontWeight: "600",
-                }}
-              >
-                📥 Download CSV
-              </button>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "1rem", alignItems: "end" }}>
+              <div>
+                <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>From (optional)</label>
+                <input
+                  type="date"
+                  value={exportStart}
+                  onChange={(e) => setExportStart(e.target.value)}
+                  style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>To (optional)</label>
+                <input
+                  type="date"
+                  value={exportEnd}
+                  onChange={(e) => setExportEnd(e.target.value)}
+                  style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
+                />
+              </div>
+              <div>
+                <button
+                  onClick={handleDownload}
+                  style={{
+                    width: "100%",
+                    padding: "0.7rem 1rem",
+                    backgroundColor: "#2196F3",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                  }}
+                >
+                  📥 Download CSV
+                </button>
+              </div>
             </div>
           </div>
         </div>
