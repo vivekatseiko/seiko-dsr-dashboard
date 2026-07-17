@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useRouter } from "next/router";
 import styles from "../styles/Dashboard.module.css";
 
 const formatIndianNumber = (num) => {
@@ -13,7 +12,6 @@ const formatIndianNumber = (num) => {
 };
 
 export default function Upload() {
-  const router = useRouter();
   const [activeTab, setActiveTab] = useState("sales");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -62,7 +60,7 @@ export default function Upload() {
   }, [activeTab, filterStore, filterMonth, filterYear]);
 
   const setStage = (percent, label) => {
-    setProgress(percent);
+    setProgress(Math.min(100, Math.round(percent)));
     setProgressLabel(label);
   };
 
@@ -119,7 +117,6 @@ export default function Upload() {
         setMessage("✅ Target deleted successfully");
         setMessageType("success");
         fetchTargets();
-        setTimeout(() => setMessage(""), 2000);
       }
     } catch (err) {
       setMessage(`❌ Error: ${err.message}`);
@@ -134,8 +131,7 @@ export default function Upload() {
 
   const isDateColumn = (columnName) => {
     if (!columnName) return false;
-    const name = columnName.toString().toLowerCase();
-    return name.includes("date");
+    return columnName.toString().toLowerCase().includes("date");
   };
 
   const parseDate = (dateValue) => {
@@ -172,6 +168,25 @@ export default function Upload() {
     return null;
   };
 
+  // Load SheetJS once, reuse for every file
+  const loadXLSX = () =>
+    new Promise((resolve, reject) => {
+      if (window.XLSX) return resolve(window.XLSX);
+      const script = document.createElement("script");
+      script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
+      script.onload = () => resolve(window.XLSX);
+      script.onerror = () => reject(new Error("Failed to load Excel library"));
+      document.head.appendChild(script);
+    });
+
+  const readFileAsArrayBuffer = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+      reader.readAsArrayBuffer(file);
+    });
+
   const handleDownload = () => {
     const params = new URLSearchParams();
     if (exportStores.length > 0) params.append("storeCodes", exportStores.join(","));
@@ -180,441 +195,387 @@ export default function Upload() {
     window.location.href = `/api/sales-export?${params.toString()}`;
   };
 
-  const handleTargetFileUpload = async (file) => {
-    setLoading(true);
-    setStage(5, "Reading target file...");
-    setMessage("");
-    setMessageType("info");
+  // ---------------------------------------------------------------
+  // Process ONE sales file end-to-end. Returns { ok, text }.
+  // Progress is reported within [pBase, pBase + pSpan].
+  // ---------------------------------------------------------------
+  const processSalesFile = async (file, XLSX, pBase, pSpan) => {
+    const buffer = await readFileAsArrayBuffer(file);
+    const workbook = XLSX.read(buffer, { type: "array" });
 
-    try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const script = document.createElement("script");
-        script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
+    const allRecords = [];
+    const rejectedRows = [];
+    let processedSheets = 0;
+    let skippedSheets = 0;
 
-        script.onerror = () => {
-          setMessage("❌ Failed to load Excel library.");
-          setMessageType("error");
-          setLoading(false);
-        };
+    const totalSheets = workbook.SheetNames.length;
+    let sheetIdx = 0;
 
-        script.onload = async () => {
-          try {
-            setStage(25, "Parsing target data...");
-            const XLSX = window.XLSX;
-            const workbook = XLSX.read(event.target.result, { type: "array" });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    for (const sheetName of workbook.SheetNames) {
+      sheetIdx++;
+      setStage(
+        pBase + (sheetIdx / totalSheets) * pSpan * 0.6,
+        `${file.name} — parsing sheet ${sheetIdx}/${totalSheets}: ${sheetName}`
+      );
 
-            const targetRecords = [];
+      try {
+        const sheet = workbook.Sheets[sheetName];
+        const sheetStoreCode = findStoreCode(sheet, XLSX);
 
-            for (let i = 1; i < rows.length; i++) {
-              const row = rows[i];
-              if (!row || row.length < 7) continue;
+        if (!sheetStoreCode) {
+          skippedSheets++;
+          continue;
+        }
 
-              const storeCode = row[0]?.toString().toUpperCase().trim();
-              const month = parseInt(row[2]);
-              const year = parseInt(row[3]);
-              const valueTarget = parseFloat(row[4]);
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        if (!rows || rows.length === 0) {
+          skippedSheets++;
+          continue;
+        }
 
-              if (!isValidStoreCode(storeCode) || !month || !year || !valueTarget || month < 1 || month > 12) {
-                continue;
-              }
+        let headerRowIndex = -1;
+        let dateColumnIndex = -1;
 
-              targetRecords.push({
-                store_code: storeCode,
-                target_month: month,
-                target_year: year,
-                value_target: valueTarget,
-                calibre_1_name: row[5] ? row[5].toString() : null,
-                calibre_1_qty_target: row[6] ? parseInt(row[6]) : null,
-                calibre_2_name: row[7] ? row[7].toString() : null,
-                calibre_2_qty_target: row[8] ? parseInt(row[8]) : null,
-                calibre_3_name: row[9] ? row[9].toString() : null,
-                calibre_3_qty_target: row[10] ? parseInt(row[10]) : null,
-              });
+        for (let i = 0; i < Math.min(rows.length, 30); i++) {
+          const row = rows[i];
+          if (!row || row.length === 0) continue;
+          for (let j = 0; j < row.length; j++) {
+            if (isDateColumn(row[j])) {
+              headerRowIndex = i;
+              dateColumnIndex = j;
+              break;
             }
-
-            if (targetRecords.length === 0) {
-              setMessage("❌ No valid target data found in file.");
-              setMessageType("error");
-              setLoading(false);
-              return;
-            }
-
-            setStage(60, `Uploading ${targetRecords.length} target records...`);
-
-            const userEmail = localStorage.getItem("userEmail") || "unknown";
-
-            const response = await fetch("/api/targets-upload", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ records: targetRecords, uploadedBy: userEmail }),
-            });
-
-            const result = await response.json();
-
-            if (!response.ok) {
-              setMessage(`❌ Upload Failed: ${result.error}`);
-              setMessageType("error");
-              setLoading(false);
-              return;
-            }
-
-            setStage(100, "Done");
-            setMessage(`✅ Uploaded ${result.recordsInserted} target records`);
-            setMessageType("success");
-            setLoading(false);
-            setTimeout(() => {
-              setMessage("");
-              fetchTargets();
-            }, 2000);
-          } catch (err) {
-            setMessage(`❌ Error: ${err.message}`);
-            setMessageType("error");
-            setLoading(false);
           }
-        };
+          if (headerRowIndex !== -1) break;
+        }
 
-        document.head.appendChild(script);
-      };
+        if (headerRowIndex === -1) {
+          skippedSheets++;
+          continue;
+        }
 
-      reader.readAsArrayBuffer(file);
-    } catch (err) {
-      setMessage(`❌ Error: ${err.message}`);
-      setMessageType("error");
-      setLoading(false);
+        let dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[dateColumnIndex]);
+
+        if (dataRows.length > 0 && isDateColumn(dataRows[0][dateColumnIndex])) {
+          dataRows = dataRows.slice(1);
+        }
+
+        if (dataRows.length === 0 || !parseDate(dataRows[0][dateColumnIndex])) {
+          skippedSheets++;
+          continue;
+        }
+
+        processedSheets++;
+
+        for (const row of dataRows) {
+          const transactionDate = parseDate(row[dateColumnIndex]);
+          const quantity = parseInt(row[3] || 0);
+
+          if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
+
+          if (Math.abs(quantity) !== 1) {
+            rejectedRows.push({
+              sheet: sheetName,
+              date: transactionDate,
+              model: (row[2] ?? "").toString(),
+              serial: (row[4] ?? "").toString(),
+              reason: `Qty is ${quantity} — each unit must be its own row with its own serial number (qty 1, or -1 for a return)`,
+            });
+            continue;
+          }
+
+          const invoiceNumber = (row[1] ?? "").toString().trim();
+          if (!invoiceNumber) {
+            rejectedRows.push({
+              sheet: sheetName,
+              date: transactionDate,
+              model: (row[2] ?? "").toString(),
+              serial: (row[4] ?? "").toString(),
+              reason: "Missing invoice number",
+            });
+            continue;
+          }
+
+          const mrp = parseFloat(row[5] || 0);
+          const netValue = parseFloat(row[6] || 0);
+          const discountValue = mrp - netValue;
+          const discountPercentage = mrp !== 0 ? (discountValue / mrp) * 100 : 0;
+
+          const rawDisc = row[7];
+          const fileDiscount =
+            rawDisc === "" || rawDisc === null || rawDisc === undefined
+              ? null
+              : parseFloat(rawDisc);
+
+          if (fileDiscount !== null && !isNaN(fileDiscount) && Math.abs(fileDiscount - discountValue) > 1) {
+            rejectedRows.push({
+              sheet: sheetName,
+              date: transactionDate,
+              model: (row[2] ?? "").toString(),
+              serial: (row[4] ?? "").toString(),
+              reason: `Discount mismatch: file says ${fileDiscount.toFixed(0)}, but MRP(${mrp.toFixed(0)}) - Net(${netValue.toFixed(0)}) = ${discountValue.toFixed(0)}`,
+            });
+            continue;
+          }
+
+          allRecords.push({
+            store_code: sheetStoreCode,
+            transaction_date: transactionDate,
+            system_invoice_number: invoiceNumber,
+            model_number: (row[2] ?? "").toString().trim(),
+            quantity: quantity,
+            serial_number: (row[4] ?? "").toString().trim(),
+            mrp: mrp,
+            net_value: netValue,
+            discount_value: parseFloat(discountValue.toFixed(2)),
+            discount_percentage: parseFloat(discountPercentage.toFixed(2)),
+            sold_by: (row[9] ?? "").toString().trim(),
+            family: (row[11] ?? "").toString().trim(),
+            calibre: (row[12] ?? "").toString().trim(),
+            customer_name: (row[16] ?? "").toString().trim(),
+            mobile_number: (row[17] ?? "").toString().trim(),
+          });
+        }
+      } catch (err) {
+        console.error(`Error on sheet ${sheetName}:`, err);
+        skippedSheets++;
+      }
     }
+
+    // Fail loudly per file
+    if (rejectedRows.length > 0) {
+      console.warn(`Rejected rows in ${file.name}:`, rejectedRows);
+      const detail = rejectedRows
+        .slice(0, 8)
+        .map((r) => `${r.sheet} • ${r.date} • ${r.model || "?"} • ${r.serial || "?"}\n    → ${r.reason}`)
+        .join("\n");
+      let text = `❌ ${rejectedRows.length} row(s) REJECTED:\n${detail}`;
+      if (rejectedRows.length > 8) {
+        text += `\n...and ${rejectedRows.length - 8} more (see browser console)`;
+      }
+      text += `\nNothing from this file was uploaded. Fix these rows and re-upload.`;
+      return { ok: false, text };
+    }
+
+    if (allRecords.length === 0) {
+      return {
+        ok: false,
+        text: `❌ No valid data found. Processed: ${processedSheets} sheet(s), Skipped: ${skippedSheets} sheet(s)`,
+      };
+    }
+
+    setStage(pBase + pSpan * 0.65, `${file.name} — uploading ${allRecords.length} records...`);
+
+    const userEmail = localStorage.getItem("userEmail") || "unknown";
+    const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
+
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        records: allRecords,
+        storeCode: uploadStoreCode,
+        userEmail,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      return { ok: false, text: `❌ Upload Failed: ${result.error}` };
+    }
+
+    let text = `✅ ${result.recordsInserted} new record(s) uploaded from ${processedSheets} sheet(s).`;
+    if (result.duplicatesSkipped > 0) {
+      text += `\n${result.duplicatesSkipped} duplicate(s) skipped (already in database).`;
+    }
+    if (result.discrepanciesFlagged > 0) {
+      text += `\n⚠ ${result.discrepanciesFlagged} row(s) conflict with existing data — awaiting approval on the Approvals page.`;
+    }
+
+    // Reconciliation
+    setStage(pBase + pSpan * 0.85, `${file.name} — reconciling against database...`);
+    let hadGhosts = false;
+    try {
+      const fileTotals = {};
+      for (const r of allRecords) {
+        const ym = r.transaction_date.substring(0, 7);
+        if (!fileTotals[ym]) {
+          fileTotals[ym] = { net: 0, rows: 0 };
+        }
+        fileTotals[ym].net += r.net_value;
+        fileTotals[ym].rows += 1;
+      }
+
+      const monthKeys = Object.keys(fileTotals).sort();
+      const recon = await fetch(
+        `/api/reconcile?storeCode=${uploadStoreCode}&months=${monthKeys.join(",")}`
+      );
+      const reconResult = await recon.json();
+
+      if (recon.ok && reconResult.data) {
+        const ghostWarnings = [];
+        const pendingNotes = [];
+
+        for (const ym of monthKeys) {
+          const f = fileTotals[ym];
+          const d = reconResult.data[ym];
+          if (!d) continue;
+
+          const diff = d.total_net - f.net;
+
+          if (diff > 1) {
+            ghostWarnings.push(
+              `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} vs file ₹${Math.round(f.net).toLocaleString("en-IN")} (+₹${Math.round(diff).toLocaleString("en-IN")}, ${d.row_count - f.rows} extra row(s))`
+            );
+          } else if (diff < -1 && result.discrepanciesFlagged > 0) {
+            pendingNotes.push(
+              `${ym}: database is ₹${Math.round(-diff).toLocaleString("en-IN")} below file — expected, rows are pending approval`
+            );
+          } else if (diff < -1) {
+            ghostWarnings.push(
+              `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} is BELOW file ₹${Math.round(f.net).toLocaleString("en-IN")} (−₹${Math.round(-diff).toLocaleString("en-IN")}) — rows missing from database`
+            );
+          }
+        }
+
+        if (ghostWarnings.length > 0) {
+          hadGhosts = true;
+          text += `\n🔴 RECONCILIATION MISMATCH:\n${ghostWarnings.join("\n")}\nLikely cause: a previously uploaded row was edited or removed in the file, leaving a stale copy in the database.`;
+        } else {
+          text += `\n✓ Reconciled: database matches file totals for ${monthKeys.join(", ")}.`;
+          if (pendingNotes.length > 0) {
+            text += `\n${pendingNotes.join("\n")}`;
+          }
+        }
+      }
+    } catch (reconErr) {
+      text += `\n(Reconciliation check could not run: ${reconErr.message})`;
+    }
+
+    return { ok: !hadGhosts, text };
   };
 
-  const handleSalesFileUpload = async (file) => {
-    setLoading(true);
-    setStage(5, "Reading file...");
-    setMessage("");
-    setMessageType("info");
+  // ---------------------------------------------------------------
+  // Process ONE target file. Returns { ok, text }.
+  // ---------------------------------------------------------------
+  const processTargetFile = async (file, XLSX, pBase, pSpan) => {
+    const buffer = await readFileAsArrayBuffer(file);
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
-    try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        setStage(12, "Loading Excel library...");
-        const script = document.createElement("script");
-        script.src = "https://cdn.sheetjs.com/xlsx-0.18.5/package/dist/xlsx.full.min.js";
+    setStage(pBase + pSpan * 0.3, `${file.name} — parsing target data...`);
 
-        script.onerror = () => {
-          setMessage("❌ Failed to load Excel library.");
-          setMessageType("error");
-          setLoading(false);
-        };
+    const targetRecords = [];
 
-        script.onload = async () => {
-          try {
-            const XLSX = window.XLSX;
-            const workbook = XLSX.read(event.target.result, { type: "array" });
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length < 7) continue;
 
-            const allRecords = [];
-            const rejectedRows = [];
-            let processedSheets = 0;
-            let skippedSheets = 0;
+      const storeCode = row[0]?.toString().toUpperCase().trim();
+      const month = parseInt(row[2]);
+      const year = parseInt(row[3]);
+      const valueTarget = parseFloat(row[4]);
 
-            const totalSheets = workbook.SheetNames.length;
-            let sheetIdx = 0;
+      if (!isValidStoreCode(storeCode) || !month || !year || !valueTarget || month < 1 || month > 12) {
+        continue;
+      }
 
-            for (const sheetName of workbook.SheetNames) {
-              sheetIdx++;
-              setStage(
-                15 + Math.round((sheetIdx / totalSheets) * 45),
-                `Parsing sheet ${sheetIdx}/${totalSheets}: ${sheetName}`
-              );
-
-              try {
-                const sheet = workbook.Sheets[sheetName];
-
-                const sheetStoreCode = findStoreCode(sheet, XLSX);
-
-                if (!sheetStoreCode) {
-                  skippedSheets++;
-                  continue;
-                }
-
-                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-
-                if (!rows || rows.length === 0) {
-                  skippedSheets++;
-                  continue;
-                }
-
-                let headerRowIndex = -1;
-                let dateColumnIndex = -1;
-
-                for (let i = 0; i < Math.min(rows.length, 30); i++) {
-                  const row = rows[i];
-                  if (!row || row.length === 0) continue;
-                  for (let j = 0; j < row.length; j++) {
-                    if (isDateColumn(row[j])) {
-                      headerRowIndex = i;
-                      dateColumnIndex = j;
-                      break;
-                    }
-                  }
-                  if (headerRowIndex !== -1) break;
-                }
-
-                if (headerRowIndex === -1) {
-                  skippedSheets++;
-                  continue;
-                }
-
-                let dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[dateColumnIndex]);
-
-                if (dataRows.length > 0 && isDateColumn(dataRows[0][dateColumnIndex])) {
-                  dataRows = dataRows.slice(1);
-                }
-
-                if (dataRows.length === 0) {
-                  skippedSheets++;
-                  continue;
-                }
-
-                if (!parseDate(dataRows[0][dateColumnIndex])) {
-                  skippedSheets++;
-                  continue;
-                }
-
-                processedSheets++;
-
-                for (const row of dataRows) {
-                  const transactionDate = parseDate(row[dateColumnIndex]);
-                  const quantity = parseInt(row[3] || 0);
-
-                  if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
-
-                  // One row per physical unit
-                  if (Math.abs(quantity) !== 1) {
-                    rejectedRows.push({
-                      sheet: sheetName,
-                      date: transactionDate,
-                      model: (row[2] ?? "").toString(),
-                      serial: (row[4] ?? "").toString(),
-                      reason: `Qty is ${quantity} — each unit must be its own row with its own serial number (qty 1, or -1 for a return)`,
-                    });
-                    continue;
-                  }
-
-                  // Invoice number is mandatory
-                  const invoiceNumber = (row[1] ?? "").toString().trim();
-                  if (!invoiceNumber) {
-                    rejectedRows.push({
-                      sheet: sheetName,
-                      date: transactionDate,
-                      model: (row[2] ?? "").toString(),
-                      serial: (row[4] ?? "").toString(),
-                      reason: "Missing invoice number",
-                    });
-                    continue;
-                  }
-
-                  const mrp = parseFloat(row[5] || 0);
-                  const netValue = parseFloat(row[6] || 0);
-                  const discountValue = mrp - netValue;
-                  const discountPercentage = mrp !== 0 ? (discountValue / mrp) * 100 : 0;
-
-                  // Cross-check the file's own Discount Value column
-                  const rawDisc = row[7];
-                  const fileDiscount =
-                    rawDisc === "" || rawDisc === null || rawDisc === undefined
-                      ? null
-                      : parseFloat(rawDisc);
-
-                  if (fileDiscount !== null && !isNaN(fileDiscount) && Math.abs(fileDiscount - discountValue) > 1) {
-                    rejectedRows.push({
-                      sheet: sheetName,
-                      date: transactionDate,
-                      model: (row[2] ?? "").toString(),
-                      serial: (row[4] ?? "").toString(),
-                      reason: `Discount mismatch: file says ${fileDiscount.toFixed(0)}, but MRP(${mrp.toFixed(0)}) - Net(${netValue.toFixed(0)}) = ${discountValue.toFixed(0)}`,
-                    });
-                    continue;
-                  }
-
-                  allRecords.push({
-                    store_code: sheetStoreCode,
-                    transaction_date: transactionDate,
-                    system_invoice_number: invoiceNumber,
-                    model_number: (row[2] ?? "").toString().trim(),
-                    quantity: quantity,
-                    serial_number: (row[4] ?? "").toString().trim(),
-                    mrp: mrp,
-                    net_value: netValue,
-                    discount_value: parseFloat(discountValue.toFixed(2)),
-                    discount_percentage: parseFloat(discountPercentage.toFixed(2)),
-                    sold_by: (row[9] ?? "").toString().trim(),
-                    family: (row[11] ?? "").toString().trim(),
-                    calibre: (row[12] ?? "").toString().trim(),
-                    customer_name: (row[16] ?? "").toString().trim(),
-                    mobile_number: (row[17] ?? "").toString().trim(),
-                  });
-                }
-              } catch (err) {
-                console.error(`Error on sheet ${sheetName}:`, err);
-                skippedSheets++;
-              }
-            }
-
-            // Fail loudly on any bad row - nothing gets uploaded
-            if (rejectedRows.length > 0) {
-              console.warn("Rejected rows:", rejectedRows);
-              const detail = rejectedRows
-                .slice(0, 8)
-                .map((r) => `${r.sheet} • ${r.date} • ${r.model || "?"} • ${r.serial || "?"}\n    → ${r.reason}`)
-                .join("\n");
-              let msg = `❌ ${rejectedRows.length} row(s) REJECTED:\n\n${detail}`;
-              if (rejectedRows.length > 8) {
-                msg += `\n\n...and ${rejectedRows.length - 8} more (see browser console)`;
-              }
-              msg += `\n\nNothing was uploaded. Fix these rows in the source file and re-upload.`;
-              setMessage(msg);
-              setMessageType("error");
-              setLoading(false);
-              return;
-            }
-
-            if (allRecords.length === 0) {
-              setMessage(`❌ No valid data found. Processed: ${processedSheets} sheets, Skipped: ${skippedSheets} sheets`);
-              setMessageType("error");
-              setLoading(false);
-              return;
-            }
-
-            setStage(65, `Uploading ${allRecords.length} records to server...`);
-
-            const userEmail = localStorage.getItem("userEmail") || "unknown";
-            const uploadStoreCode = allRecords[0]?.store_code || "UNKNOWN";
-
-            const response = await fetch("/api/upload", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                records: allRecords,
-                storeCode: uploadStoreCode,
-                userEmail,
-              }),
-            });
-
-            const result = await response.json();
-
-            if (!response.ok) {
-              setMessage(`❌ Upload Failed: ${result.error}`);
-              setMessageType("error");
-              setLoading(false);
-              return;
-            }
-
-            let summary = `✅ ${result.recordsInserted} new record(s) uploaded from ${processedSheets} sheet(s).`;
-            if (result.duplicatesSkipped > 0) {
-              summary += `\n${result.duplicatesSkipped} duplicate(s) skipped (already in database).`;
-            }
-            if (result.discrepanciesFlagged > 0) {
-              summary += `\n⚠ ${result.discrepanciesFlagged} row(s) conflict with existing data — awaiting approval on the Approvals page.`;
-            }
-
-            // Reconciliation: file totals vs database totals per month
-            setStage(85, "Reconciling database against file...");
-            try {
-              const fileTotals = {};
-              for (const r of allRecords) {
-                const ym = r.transaction_date.substring(0, 7);
-                if (!fileTotals[ym]) {
-                  fileTotals[ym] = { net: 0, mrp: 0, rows: 0 };
-                }
-                fileTotals[ym].net += r.net_value;
-                fileTotals[ym].mrp += r.mrp;
-                fileTotals[ym].rows += 1;
-              }
-
-              const monthKeys = Object.keys(fileTotals).sort();
-              const recon = await fetch(
-                `/api/reconcile?storeCode=${uploadStoreCode}&months=${monthKeys.join(",")}`
-              );
-              const reconResult = await recon.json();
-
-              if (recon.ok && reconResult.data) {
-                const ghostWarnings = [];
-                const pendingNotes = [];
-
-                for (const ym of monthKeys) {
-                  const f = fileTotals[ym];
-                  const d = reconResult.data[ym];
-                  if (!d) continue;
-
-                  const diff = d.total_net - f.net;
-
-                  if (diff > 1) {
-                    ghostWarnings.push(
-                      `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} vs file ₹${Math.round(f.net).toLocaleString("en-IN")} (+₹${Math.round(diff).toLocaleString("en-IN")}, ${d.row_count - f.rows} extra row(s))`
-                    );
-                  } else if (diff < -1 && result.discrepanciesFlagged > 0) {
-                    pendingNotes.push(
-                      `${ym}: database is ₹${Math.round(-diff).toLocaleString("en-IN")} below file — expected, rows are pending approval`
-                    );
-                  } else if (diff < -1) {
-                    ghostWarnings.push(
-                      `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} is BELOW file ₹${Math.round(f.net).toLocaleString("en-IN")} (−₹${Math.round(-diff).toLocaleString("en-IN")}) — rows missing from database`
-                    );
-                  }
-                }
-
-                if (ghostWarnings.length > 0) {
-                  summary += `\n\n🔴 RECONCILIATION MISMATCH — database does not match your file:\n${ghostWarnings.join("\n")}\n\nLikely cause: a previously uploaded row was edited or removed in the file, leaving a stale copy in the database. Contact admin to investigate.`;
-                  setStage(100, "Done - with warnings");
-                  setMessage(summary);
-                  setMessageType("error");
-                  setLoading(false);
-                  return;
-                } else {
-                  summary += `\n\n✓ Reconciled: database matches file totals for ${monthKeys.join(", ")}.`;
-                  if (pendingNotes.length > 0) {
-                    summary += `\n${pendingNotes.join("\n")}`;
-                  }
-                }
-              }
-            } catch (reconErr) {
-              summary += `\n\n(Reconciliation check could not run: ${reconErr.message})`;
-            }
-
-            setStage(100, "Done");
-            setMessage(summary);
-            setMessageType("success");
-            setLoading(false);
-            setTimeout(() => router.push("/dashboard"), 3500);
-          } catch (err) {
-            setMessage(`❌ Error: ${err.message}`);
-            setMessageType("error");
-            setLoading(false);
-          }
-        };
-
-        document.head.appendChild(script);
-      };
-
-      reader.readAsArrayBuffer(file);
-    } catch (err) {
-      setMessage(`❌ Error: ${err.message}`);
-      setMessageType("error");
-      setLoading(false);
+      targetRecords.push({
+        store_code: storeCode,
+        target_month: month,
+        target_year: year,
+        value_target: valueTarget,
+        calibre_1_name: row[5] ? row[5].toString() : null,
+        calibre_1_qty_target: row[6] ? parseInt(row[6]) : null,
+        calibre_2_name: row[7] ? row[7].toString() : null,
+        calibre_2_qty_target: row[8] ? parseInt(row[8]) : null,
+        calibre_3_name: row[9] ? row[9].toString() : null,
+        calibre_3_qty_target: row[10] ? parseInt(row[10]) : null,
+      });
     }
+
+    if (targetRecords.length === 0) {
+      return { ok: false, text: "❌ No valid target data found in file." };
+    }
+
+    setStage(pBase + pSpan * 0.6, `${file.name} — uploading ${targetRecords.length} target records...`);
+
+    const userEmail = localStorage.getItem("userEmail") || "unknown";
+
+    const response = await fetch("/api/targets-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records: targetRecords, uploadedBy: userEmail }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      return { ok: false, text: `❌ Upload Failed: ${result.error}` };
+    }
+
+    return { ok: true, text: `✅ Uploaded ${result.recordsInserted} target records` };
   };
 
+  // ---------------------------------------------------------------
+  // Driver: processes ALL selected files sequentially
+  // ---------------------------------------------------------------
   const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    e.target.value = ""; // allow re-selecting the same file(s)
+    if (files.length === 0) return;
 
-    if (fileType === "sales") {
-      handleSalesFileUpload(file);
-    } else {
-      handleTargetFileUpload(file);
+    setLoading(true);
+    setMessage("");
+    setMessageType("info");
+    setStage(2, "Loading Excel library...");
+
+    let XLSX;
+    try {
+      XLSX = await loadXLSX();
+    } catch (err) {
+      setMessage(`❌ ${err.message}`);
+      setMessageType("error");
+      setLoading(false);
+      return;
     }
 
-    e.target.value = "";
+    const results = [];
+    const span = 96 / files.length;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const pBase = 2 + i * span;
+      setStage(pBase, `File ${i + 1}/${files.length}: ${file.name}`);
+
+      try {
+        const result =
+          fileType === "sales"
+            ? await processSalesFile(file, XLSX, pBase, span)
+            : await processTargetFile(file, XLSX, pBase, span);
+        results.push({ name: file.name, ...result });
+      } catch (err) {
+        results.push({ name: file.name, ok: false, text: `❌ Error: ${err.message}` });
+      }
+    }
+
+    setStage(100, "Done");
+
+    const anyFailed = results.some((r) => !r.ok);
+    const report =
+      files.length === 1
+        ? results[0].text
+        : results.map((r) => `━━ ${r.name} ━━\n${r.text}`).join("\n\n");
+
+    setMessage(report);
+    setMessageType(anyFailed ? "error" : "success");
+    setLoading(false);
+
+    if (fileType === "target") {
+      fetchTargets();
+    }
   };
 
   const tabStyle = (tab) => ({
@@ -731,14 +692,15 @@ export default function Upload() {
           >
             {fileType === "sales" ? (
               <p>
-                📊 <strong>Sales Data File.</strong> Rows are rejected if: invoice number is
-                missing, qty is not 1 / -1 (one row per serial), or MRP − Net doesn't match the
-                stated Discount. If any row fails, nothing is uploaded.
+                📊 <strong>Sales Data File(s).</strong> You can select multiple files — they are
+                processed one at a time. Rows are rejected if: invoice number is missing, qty is
+                not 1 / -1 (one row per serial), or MRP − Net doesn't match the stated Discount.
+                A file with any bad row uploads nothing from that file.
               </p>
             ) : (
               <p>
-                🎯 <strong>Sales Target File:</strong> Store Code | Store Name | Month (1-12) | Year
-                | Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty
+                🎯 <strong>Sales Target File(s):</strong> Store Code | Store Name | Month (1-12) |
+                Year | Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty
               </p>
             )}
           </div>
@@ -754,6 +716,7 @@ export default function Upload() {
           >
             <input
               type="file"
+              multiple
               accept={fileType === "sales" ? ".xlsx,.xls" : ".csv,.xlsx,.xls"}
               onChange={handleFileUpload}
               disabled={loading}
