@@ -20,7 +20,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { storeCode, startDate, endDate } = req.query;
+    const { storeCodes, startDate, endDate } = req.query;
+
+    const storeList = storeCodes
+      ? storeCodes.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
+      : [];
 
     const columns = [
       "transaction_date", "store_code", "system_invoice_number", "model_number",
@@ -40,8 +44,8 @@ export default async function handler(req, res) {
         .order("transaction_date", { ascending: true })
         .range(from, from + pageSize - 1);
 
-      if (storeCode && storeCode !== "all") {
-        query = query.eq("store_code", storeCode.toUpperCase());
+      if (storeList.length > 0) {
+        query = query.in("store_code", storeList);
       }
       if (startDate) {
         query = query.gte("transaction_date", startDate);
