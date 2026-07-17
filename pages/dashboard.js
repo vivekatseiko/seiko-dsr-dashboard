@@ -4,6 +4,9 @@ import styles from "../styles/Dashboard.module.css";
 const STORE_COLORS = [
   "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
   "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+  "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
+  "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
+  "#393b79", "#637939", "#8c6d31", "#843c39", "#7b4173", "#5254a3",
 ];
 
 const formatIndianNumber = (num) => {
@@ -103,31 +106,48 @@ export default function Dashboard() {
     );
   }
 
-  const chartDataByStore = {};
+  // ---- Build ONE combined dataset: a row per date, a column per store (daily MRP) ----
+  const storeList = [];
+  const dateMap = {};
 
   if (data.dailyTrend) {
     for (const record of data.dailyTrend) {
       const store = record.store_code;
-      if (!chartDataByStore[store]) {
-        chartDataByStore[store] = [];
+      if (store === "UNKNOWN") continue;
+      if (!storeList.includes(store)) storeList.push(store);
+
+      if (!dateMap[record.date]) {
+        const isWeekend = record.dayOfWeek === 0 || record.dayOfWeek === 6;
+        dateMap[record.date] = {
+          date: record.date,
+          formattedDate: formatDate(record.date),
+          isWeekend,
+          dayOfWeek: record.dayOfWeek,
+          weekendBand: isWeekend ? 1 : 0,
+        };
       }
-
-      const isWeekend = record.dayOfWeek === 0 || record.dayOfWeek === 6;
-
-      chartDataByStore[store].push({
-        date: record.date,
-        formattedDate: formatDate(record.date),
-        sales: record.sales,
-        mrp: record.mrp || 0,
-        quantity: record.quantity,
-        discount: record.discount,
-        isWeekend: isWeekend,
-        dayOfWeek: record.dayOfWeek,
-        // 1 on a hidden 0-1 axis: full-height background band without touching the MRP scale
-        weekendBand: isWeekend ? 1 : 0,
-      });
+      dateMap[record.date][store] = record.mrp || 0;
+      dateMap[record.date][`${store}__net`] = record.sales || 0;
+      dateMap[record.date][`${store}__qty`] = record.quantity || 0;
     }
   }
+
+  storeList.sort();
+  const combinedData = Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Y axis: max across every store's daily MRP, plus reference lines when shown
+  const showRefLines = storeList.length === 1;
+  const allValues = [];
+  for (const row of combinedData) {
+    for (const s of storeList) {
+      allValues.push(row[s] || 0);
+    }
+  }
+  if (showRefLines) {
+    if (data.historicalWeekdayAvg !== null) allValues.push(data.historicalWeekdayAvg);
+    if (data.historicalWeekendAvg !== null) allValues.push(data.historicalWeekendAvg);
+  }
+  const maxY = Math.max(...allValues, 1) * 1.15;
 
   return (
     <div className={styles.container}>
@@ -236,6 +256,7 @@ export default function Dashboard() {
         }}>
           <p style={{ margin: "0 0 0.75rem 0", fontSize: "12px", color: "#666" }}>
             📊 Previous period comparison ({data.historicalPeriod?.start} to {data.historicalPeriod?.end}) — average daily MRP value, over days with sales
+            {!showRefLines && " — lines shown on the chart only when a single store is selected"}
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem" }}>
             {data.historicalWeekdayAvg !== null && (
@@ -254,138 +275,126 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Charts */}
-      {Recharts && Object.keys(chartDataByStore).length > 0 && (
+      {/* Combined Chart */}
+      {Recharts && combinedData.length > 0 && storeList.length > 0 && (
         <div style={{ marginTop: "2rem" }}>
-          <h2>Daily Sales Trend (by Store) — MRP Value</h2>
-          {Object.entries(chartDataByStore).map(([store, trendData], storeIdx) => {
-            // Y axis scales to this store's daily MRP plus the reference lines
-            const mrpValues = trendData.map((d) => d.mrp || 0);
-            const refLines = [data.historicalWeekdayAvg, data.historicalWeekendAvg].filter(
-              (v) => v !== null && v !== undefined
-            );
-            const maxY = Math.max(...mrpValues, ...refLines, 1) * 1.15;
+          <h2>Daily Sales Trend — MRP Value ({storeList.length} store{storeList.length > 1 ? "s" : ""})</h2>
 
-            return (
-              <div key={store} style={{ marginTop: "2rem", overflowX: "auto" }}>
-                <h3>{store}</h3>
+          <div style={{ overflowX: "auto" }}>
+            <Recharts.ComposedChart
+              width={1200}
+              height={450}
+              data={combinedData}
+              margin={{ top: 5, right: 30, left: 0, bottom: 80 }}
+              barCategoryGap={0}
+              barGap={0}
+            >
+              <Recharts.CartesianGrid strokeDasharray="3 3" />
+              <Recharts.XAxis
+                dataKey="formattedDate"
+                interval={Math.max(0, Math.ceil(combinedData.length / 12) - 1)}
+                angle={-45}
+                textAnchor="end"
+                height={80}
+              />
+              <Recharts.YAxis
+                yAxisId="sales"
+                tickFormatter={formatYAxisValue}
+                domain={[0, maxY]}
+                allowDataOverflow={false}
+              />
+              <Recharts.YAxis yAxisId="band" hide domain={[0, 1]} />
+              <Recharts.Tooltip
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const row = payload[0].payload;
+                    const dayType = row.isWeekend ? "Weekend 🌅" : "Weekday 📅";
+                    return (
+                      <div style={{
+                        backgroundColor: "#fff",
+                        padding: "10px",
+                        border: "1px solid #ccc",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                      }}>
+                        <p style={{ margin: 0, fontWeight: "bold" }}>📅 {row.date} — {dayType}</p>
+                        {storeList.map((s, i) => (
+                          row[s] !== undefined && (
+                            <p key={s} style={{ margin: "2px 0 0 0", color: STORE_COLORS[i % STORE_COLORS.length] }}>
+                              {s}: MRP ₹{((row[s] || 0) / 100000).toFixed(2)}L | Net ₹{((row[`${s}__net`] || 0) / 100000).toFixed(2)}L | Qty {row[`${s}__qty`] || 0}
+                            </p>
+                          )
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Recharts.Legend />
 
-                <Recharts.ComposedChart
-                  width={1200}
-                  height={400}
-                  data={trendData}
-                  margin={{ top: 5, right: 30, left: 0, bottom: 80 }}
-                  barCategoryGap={0}
-                  barGap={0}
-                >
-                  <Recharts.CartesianGrid strokeDasharray="3 3" />
-                  <Recharts.XAxis
-                    dataKey="formattedDate"
-                    interval={Math.max(0, Math.ceil(trendData.length / 12) - 1)}
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
-                  />
-                  {/* Left axis: daily MRP, scaled to this store's data */}
-                  <Recharts.YAxis
-                    yAxisId="sales"
-                    tickFormatter={formatYAxisValue}
-                    domain={[0, maxY]}
-                    allowDataOverflow={false}
-                  />
-                  {/* Hidden axis for the weekend band: always full height */}
-                  <Recharts.YAxis yAxisId="band" hide domain={[0, 1]} />
-                  <Recharts.Tooltip
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const d = payload[0].payload;
-                        const dayType = d.isWeekend ? "Weekend 🌅" : "Weekday 📅";
-                        return (
-                          <div style={{
-                            backgroundColor: "#fff",
-                            padding: "10px",
-                            border: "1px solid #ccc",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                          }}>
-                            <p style={{ margin: 0 }}>📅 Date: {d.date}</p>
-                            <p style={{ margin: 0 }}>💰 MRP Value: ₹{(d.mrp / 100000).toFixed(2)}L</p>
-                            <p style={{ margin: 0 }}>💵 Net Value: ₹{(d.sales / 100000).toFixed(2)}L</p>
-                            <p style={{ margin: 0 }}>📦 Qty: {formatIndianNumber(d.quantity)}</p>
-                            <p style={{ margin: 0 }}>{dayType}</p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Recharts.Legend />
+              {/* Weekend background band */}
+              <Recharts.Bar
+                yAxisId="band"
+                dataKey="weekendBand"
+                name="Weekend"
+                fill="#ffb366"
+                opacity={0.3}
+                isAnimationActive={false}
+              />
 
-                  {/* Weekend background band - full height on hidden axis, zero gaps */}
-                  <Recharts.Bar
-                    yAxisId="band"
-                    dataKey="weekendBand"
-                    name="Weekend"
-                    fill="#ffb366"
-                    opacity={0.3}
-                    isAnimationActive={false}
-                  />
+              {/* One line per store */}
+              {storeList.map((store, i) => (
+                <Recharts.Line
+                  key={store}
+                  yAxisId="sales"
+                  type="monotone"
+                  dataKey={store}
+                  stroke={STORE_COLORS[i % STORE_COLORS.length]}
+                  name={store}
+                  strokeWidth={2}
+                  connectNulls={false}
+                  dot={(props) => {
+                    const { cx, cy, payload } = props;
+                    if (!payload || cx === undefined || cy === undefined) return null;
+                    const r = payload.isWeekend ? 5 : 2.5;
+                    return <circle key={`${store}-${payload.date}`} cx={cx} cy={cy} r={r} fill={STORE_COLORS[i % STORE_COLORS.length]} />;
+                  }}
+                />
+              ))}
 
-                  {/* Daily MRP line */}
-                  <Recharts.Line
-                    yAxisId="sales"
-                    type="monotone"
-                    dataKey="mrp"
-                    stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]}
-                    name={`${store} Daily MRP`}
-                    connectNulls={false}
-                    dot={(props) => {
-                      const { cx, cy, payload } = props;
-                      if (!payload) return null;
-                      if (payload.isWeekend) {
-                        return <circle cx={cx} cy={cy} r={6} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} opacity={0.9} strokeWidth={2} stroke={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
-                      }
-                      return <circle cx={cx} cy={cy} r={3} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} />;
-                    }}
-                  />
+              {/* Previous-period reference lines: single-store view only */}
+              {showRefLines && data.historicalWeekdayAvg !== null && (
+                <Recharts.ReferenceLine
+                  yAxisId="sales"
+                  y={data.historicalWeekdayAvg}
+                  stroke="#000"
+                  strokeDasharray="5 5"
+                  strokeWidth={2}
+                />
+              )}
+              {showRefLines && data.historicalWeekendAvg !== null && (
+                <Recharts.ReferenceLine
+                  yAxisId="sales"
+                  y={data.historicalWeekendAvg}
+                  stroke="#000"
+                  strokeDasharray="10 5"
+                  strokeWidth={2}
+                />
+              )}
+            </Recharts.ComposedChart>
+          </div>
 
-                  {/* Previous Period Weekday Average Line (MRP) */}
-                  {data.historicalWeekdayAvg !== null && (
-                    <Recharts.ReferenceLine
-                      yAxisId="sales"
-                      y={data.historicalWeekdayAvg}
-                      stroke="#000"
-                      strokeDasharray="5 5"
-                      strokeWidth={2}
-                    />
-                  )}
-
-                  {/* Previous Period Weekend Average Line (MRP) */}
-                  {data.historicalWeekendAvg !== null && (
-                    <Recharts.ReferenceLine
-                      yAxisId="sales"
-                      y={data.historicalWeekendAvg}
-                      stroke="#000"
-                      strokeDasharray="10 5"
-                      strokeWidth={2}
-                    />
-                  )}
-                </Recharts.ComposedChart>
-
-                <div style={{ marginTop: "1rem", fontSize: "12px", display: "flex", flexWrap: "wrap", gap: "2rem" }}>
-                  <span>🔵 Weekday (small dot)</span>
-                  <span>🔵 Weekend (large dot)</span>
-                  <span style={{ backgroundColor: "#ffb366", opacity: 0.5, padding: "2px 6px", borderRadius: "3px" }}>Weekend background</span>
-                  {data.historicalWeekdayAvg !== null && (
-                    <span>— — Weekday Avg ₹{(data.historicalWeekdayAvg / 100000).toFixed(2)}L (previous period: {data.historicalPeriod?.start} to {data.historicalPeriod?.end})</span>
-                  )}
-                  {data.historicalWeekendAvg !== null && (
-                    <span>— — Weekend Avg ₹{(data.historicalWeekendAvg / 100000).toFixed(2)}L (previous period)</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          <div style={{ marginTop: "1rem", fontSize: "12px", display: "flex", flexWrap: "wrap", gap: "2rem" }}>
+            <span>● Small dot = weekday, large dot = weekend</span>
+            <span style={{ backgroundColor: "#ffb366", opacity: 0.5, padding: "2px 6px", borderRadius: "3px" }}>Weekend background</span>
+            {showRefLines && data.historicalWeekdayAvg !== null && (
+              <span>— — Weekday Avg ₹{(data.historicalWeekdayAvg / 100000).toFixed(2)}L (previous period: {data.historicalPeriod?.start} to {data.historicalPeriod?.end})</span>
+            )}
+            {showRefLines && data.historicalWeekendAvg !== null && (
+              <span>— — Weekend Avg ₹{(data.historicalWeekendAvg / 100000).toFixed(2)}L (previous period)</span>
+            )}
+          </div>
         </div>
       )}
 
