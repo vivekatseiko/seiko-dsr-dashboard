@@ -33,6 +33,12 @@ export default function Upload() {
   const [stores, setStores] = useState([]);
   const [years, setYears] = useState([]);
 
+  // Integrity check state
+  const [integrityData, setIntegrityData] = useState(null); // { storeCode, months, fileRows }
+  const [integrityResult, setIntegrityResult] = useState(null);
+  const [integrityLoading, setIntegrityLoading] = useState(false);
+  const [selectedGhosts, setSelectedGhosts] = useState([]);
+
   // Download state
   const [exportStores, setExportStores] = useState([]); // empty = all stores
   const [exportStart, setExportStart] = useState("");
@@ -196,8 +202,80 @@ export default function Upload() {
   };
 
   // ---------------------------------------------------------------
+  // Integrity check handlers
+  // ---------------------------------------------------------------
+  const runIntegrityCheck = async () => {
+    if (!integrityData) return;
+    setIntegrityLoading(true);
+    setIntegrityResult(null);
+    setSelectedGhosts([]);
+    try {
+      const response = await fetch("/api/integrity-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(integrityData),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        alert(`Check failed: ${result.error}`);
+      } else {
+        setIntegrityResult(result);
+        setSelectedGhosts(result.ghosts.map((g) => g.id)); // preselect all
+      }
+    } catch (err) {
+      alert(`Check failed: ${err.message}`);
+    } finally {
+      setIntegrityLoading(false);
+    }
+  };
+
+  const deleteSelectedGhosts = async () => {
+    if (selectedGhosts.length === 0) return;
+    const ghostRows = integrityResult.ghosts.filter((g) => selectedGhosts.includes(g.id));
+    const total = ghostRows.reduce((s, g) => s + parseFloat(g.net_value || 0), 0);
+
+    if (!confirm(
+      `Delete ${selectedGhosts.length} row(s) totalling ₹${Math.round(total).toLocaleString("en-IN")} from the database?\n\nThis cannot be undone.`
+    )) return;
+
+    setIntegrityLoading(true);
+    try {
+      const userEmail = localStorage.getItem("userEmail") || "unknown";
+      const response = await fetch("/api/integrity-check", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: selectedGhosts,
+          storeCode: integrityData.storeCode,
+          userEmail,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        alert(`Delete failed: ${result.error}`);
+      } else {
+        setMessage(
+          (prev) => prev + `\n\n🧹 Cleanup done: ${result.deleted} row(s) removed (₹${result.deletedValue.toLocaleString("en-IN")}). Re-upload the file to verify reconciliation.`
+        );
+        setIntegrityResult(null);
+        setIntegrityData(null);
+        setSelectedGhosts([]);
+      }
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`);
+    } finally {
+      setIntegrityLoading(false);
+    }
+  };
+
+  const toggleGhost = (id) => {
+    setSelectedGhosts((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  // ---------------------------------------------------------------
   // Process ONE sales file end-to-end. Returns { ok, text }.
-  // Progress is reported within [pBase, pBase + pSpan].
   // ---------------------------------------------------------------
   const processSalesFile = async (file, XLSX, pBase, pSpan) => {
     const buffer = await readFileAsArrayBuffer(file);
@@ -441,7 +519,19 @@ export default function Upload() {
 
         if (ghostWarnings.length > 0) {
           hadGhosts = true;
-          text += `\n🔴 RECONCILIATION MISMATCH:\n${ghostWarnings.join("\n")}\nLikely cause: a previously uploaded row was edited or removed in the file, leaving a stale copy in the database.`;
+          text += `\n🔴 RECONCILIATION MISMATCH:\n${ghostWarnings.join("\n")}\nUse the Investigate button below to see and fix the exact rows.`;
+          setIntegrityData({
+            storeCode: uploadStoreCode,
+            months: monthKeys,
+            fileRows: allRecords.map((r) => ({
+              system_invoice_number: r.system_invoice_number,
+              serial_number: r.serial_number,
+              quantity: r.quantity,
+              transaction_date: r.transaction_date,
+              model_number: r.model_number,
+              net_value: r.net_value,
+            })),
+          });
         } else {
           text += `\n✓ Reconciled: database matches file totals for ${monthKeys.join(", ")}.`;
           if (pendingNotes.length > 0) {
@@ -530,6 +620,9 @@ export default function Upload() {
     setLoading(true);
     setMessage("");
     setMessageType("info");
+    setIntegrityData(null);
+    setIntegrityResult(null);
+    setSelectedGhosts([]);
     setStage(2, "Loading Excel library...");
 
     let XLSX;
@@ -653,6 +746,126 @@ export default function Upload() {
           }}
         >
           {message}
+        </div>
+      )}
+
+      {/* Integrity Check panel - appears after a reconciliation mismatch */}
+      {integrityData && !integrityResult && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <button
+            onClick={runIntegrityCheck}
+            disabled={integrityLoading}
+            style={{
+              padding: "0.6rem 1.2rem",
+              backgroundColor: "#dc2626",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontWeight: "600",
+            }}
+          >
+            {integrityLoading ? "Checking..." : "🔍 Investigate mismatch"}
+          </button>
+        </div>
+      )}
+
+      {integrityResult && (
+        <div style={{
+          marginBottom: "1.5rem",
+          border: "1px solid #fca5a5",
+          borderRadius: "8px",
+          padding: "1rem",
+          backgroundColor: "#fff",
+        }}>
+          <h3 style={{ margin: "0 0 0.75rem 0", fontSize: "15px" }}>
+            🔍 Integrity report — {integrityData.storeCode}
+          </h3>
+
+          {integrityResult.ghosts.length > 0 && (
+            <>
+              <p style={{ fontSize: "13px", marginBottom: "0.5rem" }}>
+                <strong>{integrityResult.ghosts.length} row(s) in the database but NOT in your file</strong>{" "}
+                (total ₹{Math.round(integrityResult.ghostTotal).toLocaleString("en-IN")}) — stale copies or misattributed data:
+              </p>
+              <div style={{ maxHeight: "260px", overflowY: "auto", border: "1px solid #eee", borderRadius: "6px", marginBottom: "0.75rem" }}>
+                <table style={{ width: "100%", fontSize: "11px", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "#f9fafb", position: "sticky", top: 0 }}>
+                      <th style={{ padding: "6px", textAlign: "left" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedGhosts.length === integrityResult.ghosts.length}
+                          onChange={(e) =>
+                            setSelectedGhosts(e.target.checked ? integrityResult.ghosts.map((g) => g.id) : [])
+                          }
+                        />
+                      </th>
+                      <th style={{ padding: "6px", textAlign: "left" }}>Date</th>
+                      <th style={{ padding: "6px", textAlign: "left" }}>Invoice</th>
+                      <th style={{ padding: "6px", textAlign: "left" }}>Model</th>
+                      <th style={{ padding: "6px", textAlign: "left" }}>Serial</th>
+                      <th style={{ padding: "6px", textAlign: "right" }}>Net ₹</th>
+                      <th style={{ padding: "6px", textAlign: "left" }}>Uploaded by</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {integrityResult.ghosts.map((g) => (
+                      <tr key={g.id} style={{ borderTop: "1px solid #f3f4f6" }}>
+                        <td style={{ padding: "6px" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedGhosts.includes(g.id)}
+                            onChange={() => toggleGhost(g.id)}
+                          />
+                        </td>
+                        <td style={{ padding: "6px" }}>{g.transaction_date}</td>
+                        <td style={{ padding: "6px" }}>{g.system_invoice_number}</td>
+                        <td style={{ padding: "6px" }}>{g.model_number}</td>
+                        <td style={{ padding: "6px" }}>{g.serial_number}</td>
+                        <td style={{ padding: "6px", textAlign: "right" }}>{Math.round(g.net_value).toLocaleString("en-IN")}</td>
+                        <td style={{ padding: "6px" }}>{g.upload_info}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {userRole === "admin" ? (
+                <button
+                  onClick={deleteSelectedGhosts}
+                  disabled={integrityLoading || selectedGhosts.length === 0}
+                  style={{
+                    padding: "0.5rem 1rem",
+                    backgroundColor: selectedGhosts.length > 0 ? "#dc2626" : "#e5e7eb",
+                    color: selectedGhosts.length > 0 ? "white" : "#9ca3af",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: selectedGhosts.length > 0 ? "pointer" : "not-allowed",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                  }}
+                >
+                  🗑 Delete {selectedGhosts.length} selected row(s)
+                </button>
+              ) : (
+                <p style={{ fontSize: "12px", color: "#991b1b" }}>
+                  Only an admin can delete these rows. Share this report with your admin.
+                </p>
+              )}
+            </>
+          )}
+
+          {integrityResult.missing.length > 0 && (
+            <p style={{ fontSize: "12px", marginTop: "0.75rem", color: "#6b7280" }}>
+              ℹ {integrityResult.missing.length} row(s) in your file are not in the database — these are
+              either pending approval or were held back by validation. No action needed here.
+            </p>
+          )}
+
+          {integrityResult.ghosts.length === 0 && integrityResult.missing.length === 0 && (
+            <p style={{ fontSize: "13px" }}>No differences found — database and file agree at row level.</p>
+          )}
         </div>
       )}
 
