@@ -11,6 +11,8 @@ const formatIndianNumber = (num) => {
   return lastThree;
 };
 
+const inr = (n) => Math.round(n).toLocaleString("en-IN");
+
 export default function Upload() {
   const [activeTab, setActiveTab] = useState("sales");
   const [loading, setLoading] = useState(false);
@@ -34,13 +36,13 @@ export default function Upload() {
   const [years, setYears] = useState([]);
 
   // Integrity check state
-  const [integrityData, setIntegrityData] = useState(null); // { storeCode, months, fileRows }
+  const [integrityData, setIntegrityData] = useState(null);
   const [integrityResult, setIntegrityResult] = useState(null);
   const [integrityLoading, setIntegrityLoading] = useState(false);
   const [selectedGhosts, setSelectedGhosts] = useState([]);
 
   // Download state
-  const [exportStores, setExportStores] = useState([]); // empty = all stores
+  const [exportStores, setExportStores] = useState([]);
   const [exportStart, setExportStart] = useState("");
   const [exportEnd, setExportEnd] = useState("");
 
@@ -52,6 +54,13 @@ export default function Upload() {
     "SWSPMCBLR",
     "GSSEXACHN", "GSSMOABLR", "GSSPPMMUM", "GSSSLCDEL", "GSSUBCBLR",
   ];
+
+  const MONTH_MAP = {
+    january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+    july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+    jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8,
+    sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
+  };
 
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
 
@@ -140,22 +149,60 @@ export default function Upload() {
     return columnName.toString().toLowerCase().includes("date");
   };
 
+  // STRICT date parser. Returns "YYYY-MM-DD" or "" (never a raw passthrough).
+  // Accepts: Excel serial numbers, "DD-MM-YYYY" (dashes), "M/D/YY" or "MM/DD/YYYY" (slashes).
   const parseDate = (dateValue) => {
-    if (!dateValue) return "";
-    if (typeof dateValue === "string") {
-      const ddmmyyyy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.test(dateValue);
-      if (ddmmyyyy) {
-        const [day, month, year] = dateValue.split("-");
-        const date = new Date(year, month - 1, day);
-        return date.toISOString().split("T")[0];
-      }
-      return dateValue;
-    }
+    let result = "";
+
+    if (dateValue === null || dateValue === undefined || dateValue === "") return "";
+
     if (typeof dateValue === "number") {
       const date = new Date((dateValue - 25569) * 86400 * 1000);
-      return date.toISOString().split("T")[0];
+      if (!isNaN(date.getTime())) {
+        result = date.toISOString().split("T")[0];
+      }
+    } else if (typeof dateValue === "string") {
+      const s = dateValue.trim();
+
+      const dashMatch = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+      const slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+      if (dashMatch) {
+        // DD-MM-YYYY
+        const [, d, m, y] = dashMatch;
+        const date = new Date(Number(y), Number(m) - 1, Number(d));
+        if (!isNaN(date.getTime()) && date.getDate() === Number(d) && date.getMonth() === Number(m) - 1) {
+          result = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        }
+      } else if (slashMatch) {
+        // M/D/YY or MM/DD/YYYY (US order - this is how Excel emits text dates)
+        let [, m, d, y] = slashMatch;
+        let year = Number(y);
+        if (year < 100) year += 2000;
+        const date = new Date(year, Number(m) - 1, Number(d));
+        if (!isNaN(date.getTime()) && date.getDate() === Number(d) && date.getMonth() === Number(m) - 1) {
+          result = `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        }
+      } else if (isoMatch) {
+        result = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+      }
     }
-    return "";
+
+    // Final gate: must be a real YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) return "";
+    return result;
+  };
+
+  // "April-26" / "April 26" / "Apr-2026" -> "2026-04"; null if the name isn't a month sheet
+  const sheetMonthFromName = (sheetName) => {
+    const m = sheetName.trim().toLowerCase().match(/^([a-z]+)[\s-]+(\d{2,4})$/);
+    if (!m) return null;
+    const mon = MONTH_MAP[m[1]];
+    if (!mon) return null;
+    let year = parseInt(m[2]);
+    if (year < 100) year += 2000;
+    return `${year}-${String(mon).padStart(2, "0")}`;
   };
 
   // Find the store code anywhere in the top rows, not just B3
@@ -174,7 +221,6 @@ export default function Upload() {
     return null;
   };
 
-  // Load SheetJS once, reuse for every file
   const loadXLSX = () =>
     new Promise((resolve, reject) => {
       if (window.XLSX) return resolve(window.XLSX);
@@ -220,7 +266,7 @@ export default function Upload() {
         alert(`Check failed: ${result.error}`);
       } else {
         setIntegrityResult(result);
-        setSelectedGhosts(result.ghosts.map((g) => g.id)); // preselect all
+        setSelectedGhosts(result.ghosts.map((g) => g.id));
       }
     } catch (err) {
       alert(`Check failed: ${err.message}`);
@@ -235,7 +281,7 @@ export default function Upload() {
     const total = ghostRows.reduce((s, g) => s + parseFloat(g.net_value || 0), 0);
 
     if (!confirm(
-      `Delete ${selectedGhosts.length} row(s) totalling ₹${Math.round(total).toLocaleString("en-IN")} from the database?\n\nThis cannot be undone.`
+      `Delete ${selectedGhosts.length} row(s) totalling ₹${inr(total)} from the database?\n\nThis cannot be undone.`
     )) return;
 
     setIntegrityLoading(true);
@@ -255,7 +301,7 @@ export default function Upload() {
         alert(`Delete failed: ${result.error}`);
       } else {
         setMessage(
-          (prev) => prev + `\n\n🧹 Cleanup done: ${result.deleted} row(s) removed (₹${result.deletedValue.toLocaleString("en-IN")}). Re-upload the file to verify reconciliation.`
+          (prev) => prev + `\n\n🧹 Cleanup done: ${result.deleted} row(s) removed (₹${inr(result.deletedValue)}). Re-upload the file to verify reconciliation.`
         );
         setIntegrityResult(null);
         setIntegrityData(null);
@@ -338,18 +384,48 @@ export default function Upload() {
           dataRows = dataRows.slice(1);
         }
 
-        if (dataRows.length === 0 || !parseDate(dataRows[0][dateColumnIndex])) {
+        if (dataRows.length === 0) {
           skippedSheets++;
           continue;
         }
 
+        // Month lock: sheet "April-26" only accepts dates in 2026-04
+        const sheetYM = sheetMonthFromName(sheetName);
+
         processedSheets++;
 
         for (const row of dataRows) {
-          const transactionDate = parseDate(row[dateColumnIndex]);
+          const rawDate = row[dateColumnIndex];
           const quantity = parseInt(row[3] || 0);
 
-          if (!transactionDate || isNaN(quantity) || quantity === 0) continue;
+          if ((rawDate === "" || rawDate === null) && (isNaN(quantity) || quantity === 0)) continue;
+          if (isNaN(quantity) || quantity === 0) continue;
+
+          const transactionDate = parseDate(rawDate);
+
+          // Strict date gate: unparseable date = rejected row, never silent
+          if (!transactionDate) {
+            rejectedRows.push({
+              sheet: sheetName,
+              date: String(rawDate),
+              model: (row[2] ?? "").toString(),
+              serial: (row[4] ?? "").toString(),
+              reason: `Unrecognized date "${rawDate}" — must be a real date (DD-MM-YYYY, M/D/YY, or Excel date cell)`,
+            });
+            continue;
+          }
+
+          // Month lock
+          if (sheetYM && transactionDate.substring(0, 7) !== sheetYM) {
+            rejectedRows.push({
+              sheet: sheetName,
+              date: transactionDate,
+              model: (row[2] ?? "").toString(),
+              serial: (row[4] ?? "").toString(),
+              reason: `Date ${transactionDate} doesn't belong in sheet "${sheetName}" (expected ${sheetYM}). Check for swapped day/month or a wrong year.`,
+            });
+            continue;
+          }
 
           if (Math.abs(quantity) !== 1) {
             rejectedRows.push({
@@ -424,12 +500,12 @@ export default function Upload() {
     if (rejectedRows.length > 0) {
       console.warn(`Rejected rows in ${file.name}:`, rejectedRows);
       const detail = rejectedRows
-        .slice(0, 8)
+        .slice(0, 10)
         .map((r) => `${r.sheet} • ${r.date} • ${r.model || "?"} • ${r.serial || "?"}\n    → ${r.reason}`)
         .join("\n");
       let text = `❌ ${rejectedRows.length} row(s) REJECTED:\n${detail}`;
-      if (rejectedRows.length > 8) {
-        text += `\n...and ${rejectedRows.length - 8} more (see browser console)`;
+      if (rejectedRows.length > 10) {
+        text += `\n...and ${rejectedRows.length - 10} more (see browser console)`;
       }
       text += `\nNothing from this file was uploaded. Fix these rows and re-upload.`;
       return { ok: false, text };
@@ -441,6 +517,11 @@ export default function Upload() {
         text: `❌ No valid data found. Processed: ${processedSheets} sheet(s), Skipped: ${skippedSheets} sheet(s)`,
       };
     }
+
+    // File-level totals for the report
+    const fileQty = allRecords.reduce((s, r) => s + r.quantity, 0);
+    const fileMrp = allRecords.reduce((s, r) => s + r.mrp, 0);
+    const fileNet = allRecords.reduce((s, r) => s + r.net_value, 0);
 
     setStage(pBase + pSpan * 0.65, `${file.name} — uploading ${allRecords.length} records...`);
 
@@ -464,6 +545,7 @@ export default function Upload() {
     }
 
     let text = `✅ ${result.recordsInserted} new record(s) uploaded from ${processedSheets} sheet(s).`;
+    text += `\nFile totals: qty ${fileQty} | MRP ₹${inr(fileMrp)} | Net ₹${inr(fileNet)}`;
     if (result.duplicatesSkipped > 0) {
       text += `\n${result.duplicatesSkipped} duplicate(s) skipped (already in database).`;
     }
@@ -479,9 +561,11 @@ export default function Upload() {
       for (const r of allRecords) {
         const ym = r.transaction_date.substring(0, 7);
         if (!fileTotals[ym]) {
-          fileTotals[ym] = { net: 0, rows: 0 };
+          fileTotals[ym] = { net: 0, mrp: 0, qty: 0, rows: 0 };
         }
         fileTotals[ym].net += r.net_value;
+        fileTotals[ym].mrp += r.mrp;
+        fileTotals[ym].qty += r.quantity;
         fileTotals[ym].rows += 1;
       }
 
@@ -494,6 +578,7 @@ export default function Upload() {
       if (recon.ok && reconResult.data) {
         const ghostWarnings = [];
         const pendingNotes = [];
+        const monthLines = [];
 
         for (const ym of monthKeys) {
           const f = fileTotals[ym];
@@ -502,20 +587,26 @@ export default function Upload() {
 
           const diff = d.total_net - f.net;
 
+          monthLines.push(
+            `${ym}: ${f.rows} rows | qty ${f.qty} | MRP ₹${inr(f.mrp)} | Net ₹${inr(f.net)}`
+          );
+
           if (diff > 1) {
             ghostWarnings.push(
-              `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} vs file ₹${Math.round(f.net).toLocaleString("en-IN")} (+₹${Math.round(diff).toLocaleString("en-IN")}, ${d.row_count - f.rows} extra row(s))`
+              `${ym}: database ₹${inr(d.total_net)} vs file ₹${inr(f.net)} (+₹${inr(diff)}, ${d.row_count - f.rows} extra row(s))`
             );
           } else if (diff < -1 && result.discrepanciesFlagged > 0) {
             pendingNotes.push(
-              `${ym}: database is ₹${Math.round(-diff).toLocaleString("en-IN")} below file — expected, rows are pending approval`
+              `${ym}: database is ₹${inr(-diff)} below file — expected, rows are pending approval`
             );
           } else if (diff < -1) {
             ghostWarnings.push(
-              `${ym}: database ₹${Math.round(d.total_net).toLocaleString("en-IN")} is BELOW file ₹${Math.round(f.net).toLocaleString("en-IN")} (−₹${Math.round(-diff).toLocaleString("en-IN")}) — rows missing from database`
+              `${ym}: database ₹${inr(d.total_net)} is BELOW file ₹${inr(f.net)} (−₹${inr(-diff)}) — rows missing from database`
             );
           }
         }
+
+        text += `\nPer month:\n${monthLines.join("\n")}`;
 
         if (ghostWarnings.length > 0) {
           hadGhosts = true;
@@ -614,7 +705,7 @@ export default function Upload() {
   // ---------------------------------------------------------------
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
-    e.target.value = ""; // allow re-selecting the same file(s)
+    e.target.value = "";
     if (files.length === 0) return;
 
     setLoading(true);
@@ -749,7 +840,7 @@ export default function Upload() {
         </div>
       )}
 
-      {/* Integrity Check panel - appears after a reconciliation mismatch */}
+      {/* Integrity Check panel */}
       {integrityData && !integrityResult && (
         <div style={{ marginBottom: "1.5rem" }}>
           <button
@@ -787,7 +878,7 @@ export default function Upload() {
             <>
               <p style={{ fontSize: "13px", marginBottom: "0.5rem" }}>
                 <strong>{integrityResult.ghosts.length} row(s) in the database but NOT in your file</strong>{" "}
-                (total ₹{Math.round(integrityResult.ghostTotal).toLocaleString("en-IN")}) — stale copies or misattributed data:
+                (total ₹{inr(integrityResult.ghostTotal)}) — stale copies or misattributed data:
               </p>
               <div style={{ maxHeight: "260px", overflowY: "auto", border: "1px solid #eee", borderRadius: "6px", marginBottom: "0.75rem" }}>
                 <table style={{ width: "100%", fontSize: "11px", borderCollapse: "collapse" }}>
@@ -824,7 +915,7 @@ export default function Upload() {
                         <td style={{ padding: "6px" }}>{g.system_invoice_number}</td>
                         <td style={{ padding: "6px" }}>{g.model_number}</td>
                         <td style={{ padding: "6px" }}>{g.serial_number}</td>
-                        <td style={{ padding: "6px", textAlign: "right" }}>{Math.round(g.net_value).toLocaleString("en-IN")}</td>
+                        <td style={{ padding: "6px", textAlign: "right" }}>{inr(g.net_value)}</td>
                         <td style={{ padding: "6px" }}>{g.upload_info}</td>
                       </tr>
                     ))}
@@ -905,10 +996,10 @@ export default function Upload() {
           >
             {fileType === "sales" ? (
               <p>
-                📊 <strong>Sales Data File(s).</strong> You can select multiple files — they are
-                processed one at a time. Rows are rejected if: invoice number is missing, qty is
-                not 1 / -1 (one row per serial), or MRP − Net doesn't match the stated Discount.
-                A file with any bad row uploads nothing from that file.
+                📊 <strong>Sales Data File(s).</strong> You can select multiple files — processed one
+                at a time. Rows are rejected if: the date is unreadable or doesn't match the sheet's
+                month, invoice number is missing, qty is not 1 / -1, or MRP − Net doesn't match the
+                stated Discount. A file with any bad row uploads nothing from that file.
               </p>
             ) : (
               <p>
