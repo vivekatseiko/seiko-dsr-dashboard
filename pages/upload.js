@@ -144,39 +144,50 @@ export default function Upload() {
     return VALID_STORE_CODES.includes(code.toString().toUpperCase().trim());
   };
 
-  const isDateColumn = (columnName) => {
-    if (!columnName) return false;
-    return columnName.toString().toLowerCase().includes("date");
+  // A real header row must have a Date column AND at least one of invoice/serial/model.
+  // This skips summary blocks like "Balance on date".
+  const isHeaderRow = (row) => {
+    if (!row) return false;
+    const vals = row.filter((v) => v !== null && v !== undefined && v !== "").map((v) => v.toString().toLowerCase());
+    const hasDate = vals.some((v) => v === "date" || v.startsWith("date"));
+    const hasOther = vals.some((v) => v.includes("invoice") || v.includes("serial") || v.includes("model"));
+    return hasDate && hasOther;
   };
 
-  // STRICT date parser. Returns "YYYY-MM-DD" or "" (never a raw passthrough).
-  // Accepts: Excel serial numbers, "DD-MM-YYYY" (dashes), "M/D/YY" or "MM/DD/YYYY" (slashes).
+  const dateColIndexIn = (row) => {
+    for (let j = 0; j < row.length; j++) {
+      const v = row[j];
+      if (v && v.toString().trim().toLowerCase() === "date") return j;
+    }
+    // fallback: first cell that starts with "date"
+    for (let j = 0; j < row.length; j++) {
+      const v = row[j];
+      if (v && v.toString().toLowerCase().startsWith("date")) return j;
+    }
+    return -1;
+  };
+
+  // STRICT date parser. Returns "YYYY-MM-DD" or "".
   const parseDate = (dateValue) => {
     let result = "";
-
     if (dateValue === null || dateValue === undefined || dateValue === "") return "";
 
     if (typeof dateValue === "number") {
       const date = new Date((dateValue - 25569) * 86400 * 1000);
-      if (!isNaN(date.getTime())) {
-        result = date.toISOString().split("T")[0];
-      }
+      if (!isNaN(date.getTime())) result = date.toISOString().split("T")[0];
     } else if (typeof dateValue === "string") {
       const s = dateValue.trim();
-
       const dashMatch = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
       const slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
       const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
 
       if (dashMatch) {
-        // DD-MM-YYYY
         const [, d, m, y] = dashMatch;
         const date = new Date(Number(y), Number(m) - 1, Number(d));
         if (!isNaN(date.getTime()) && date.getDate() === Number(d) && date.getMonth() === Number(m) - 1) {
           result = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
         }
       } else if (slashMatch) {
-        // M/D/YY or MM/DD/YYYY (US order - this is how Excel emits text dates)
         let [, m, d, y] = slashMatch;
         let year = Number(y);
         if (year < 100) year += 2000;
@@ -189,12 +200,10 @@ export default function Upload() {
       }
     }
 
-    // Final gate: must be a real YYYY-MM-DD
     if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) return "";
     return result;
   };
 
-  // "April-26" / "April 26" / "Apr-2026" -> "2026-04"; null if the name isn't a month sheet
   const sheetMonthFromName = (sheetName) => {
     const m = sheetName.trim().toLowerCase().match(/^([a-z]+)[\s-]+(\d{2,4})$/);
     if (!m) return null;
@@ -205,7 +214,6 @@ export default function Upload() {
     return `${year}-${String(mon).padStart(2, "0")}`;
   };
 
-  // Find the store code anywhere in the top rows, not just B3
   const findStoreCode = (sheet, XLSX) => {
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
     for (let i = 0; i < Math.min(rows.length, 15); i++) {
@@ -321,7 +329,7 @@ export default function Upload() {
   };
 
   // ---------------------------------------------------------------
-  // Process ONE sales file end-to-end. Returns { ok, text }.
+  // Process ONE sales file. Model 2: upload good rows, report bad ones.
   // ---------------------------------------------------------------
   const processSalesFile = async (file, XLSX, pBase, pSpan) => {
     const buffer = await readFileAsArrayBuffer(file);
@@ -357,53 +365,39 @@ export default function Upload() {
           continue;
         }
 
+        // Find the REAL header row: must contain Date + invoice/serial/model
         let headerRowIndex = -1;
         let dateColumnIndex = -1;
-
         for (let i = 0; i < Math.min(rows.length, 30); i++) {
-          const row = rows[i];
-          if (!row || row.length === 0) continue;
-          for (let j = 0; j < row.length; j++) {
-            if (isDateColumn(row[j])) {
-              headerRowIndex = i;
-              dateColumnIndex = j;
-              break;
-            }
+          if (isHeaderRow(rows[i])) {
+            headerRowIndex = i;
+            dateColumnIndex = dateColIndexIn(rows[i]);
+            break;
           }
-          if (headerRowIndex !== -1) break;
         }
 
-        if (headerRowIndex === -1) {
+        if (headerRowIndex === -1 || dateColumnIndex === -1) {
           skippedSheets++;
           continue;
         }
 
         let dataRows = rows.slice(headerRowIndex + 1).filter((row) => row[dateColumnIndex]);
-
-        if (dataRows.length > 0 && isDateColumn(dataRows[0][dateColumnIndex])) {
-          dataRows = dataRows.slice(1);
-        }
-
         if (dataRows.length === 0) {
           skippedSheets++;
           continue;
         }
 
-        // Month lock: sheet "April-26" only accepts dates in 2026-04
         const sheetYM = sheetMonthFromName(sheetName);
-
         processedSheets++;
 
         for (const row of dataRows) {
           const rawDate = row[dateColumnIndex];
           const quantity = parseInt(row[3] || 0);
 
-          if ((rawDate === "" || rawDate === null) && (isNaN(quantity) || quantity === 0)) continue;
           if (isNaN(quantity) || quantity === 0) continue;
 
           const transactionDate = parseDate(rawDate);
 
-          // Strict date gate: unparseable date = rejected row, never silent
           if (!transactionDate) {
             rejectedRows.push({
               sheet: sheetName,
@@ -415,7 +409,6 @@ export default function Upload() {
             continue;
           }
 
-          // Month lock
           if (sheetYM && transactionDate.substring(0, 7) !== sheetYM) {
             rejectedRows.push({
               sheet: sheetName,
@@ -496,29 +489,21 @@ export default function Upload() {
       }
     }
 
-    // Fail loudly per file
-    if (rejectedRows.length > 0) {
-      console.warn(`Rejected rows in ${file.name}:`, rejectedRows);
-      const detail = rejectedRows
-        .slice(0, 10)
-        .map((r) => `${r.sheet} • ${r.date} • ${r.model || "?"} • ${r.serial || "?"}\n    → ${r.reason}`)
-        .join("\n");
-      let text = `❌ ${rejectedRows.length} row(s) REJECTED:\n${detail}`;
-      if (rejectedRows.length > 10) {
-        text += `\n...and ${rejectedRows.length - 10} more (see browser console)`;
+    // Nothing valid at all
+    if (allRecords.length === 0) {
+      let text = `❌ No valid rows to upload. Processed: ${processedSheets} sheet(s), Skipped: ${skippedSheets} sheet(s).`;
+      if (rejectedRows.length > 0) {
+        const detail = rejectedRows
+          .slice(0, 15)
+          .map((r) => `${r.sheet} • ${r.date} • ${r.model || "?"} • ${r.serial || "?"}\n    → ${r.reason}`)
+          .join("\n");
+        text += `\n\n${rejectedRows.length} row(s) rejected:\n${detail}`;
+        if (rejectedRows.length > 15) text += `\n...and ${rejectedRows.length - 15} more (see browser console)`;
       }
-      text += `\nNothing from this file was uploaded. Fix these rows and re-upload.`;
       return { ok: false, text };
     }
 
-    if (allRecords.length === 0) {
-      return {
-        ok: false,
-        text: `❌ No valid data found. Processed: ${processedSheets} sheet(s), Skipped: ${skippedSheets} sheet(s)`,
-      };
-    }
-
-    // File-level totals for the report
+    // File-level totals (accepted rows only)
     const fileQty = allRecords.reduce((s, r) => s + r.quantity, 0);
     const fileMrp = allRecords.reduce((s, r) => s + r.mrp, 0);
     const fileNet = allRecords.reduce((s, r) => s + r.net_value, 0);
@@ -531,11 +516,7 @@ export default function Upload() {
     const response = await fetch("/api/upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        records: allRecords,
-        storeCode: uploadStoreCode,
-        userEmail,
-      }),
+      body: JSON.stringify({ records: allRecords, storeCode: uploadStoreCode, userEmail }),
     });
 
     const result = await response.json();
@@ -545,24 +526,31 @@ export default function Upload() {
     }
 
     let text = `✅ ${result.recordsInserted} new record(s) uploaded from ${processedSheets} sheet(s).`;
-    text += `\nFile totals: qty ${fileQty} | MRP ₹${inr(fileMrp)} | Net ₹${inr(fileNet)}`;
+    text += `\nUploaded totals: qty ${fileQty} | MRP ₹${inr(fileMrp)} | Net ₹${inr(fileNet)}`;
     if (result.duplicatesSkipped > 0) {
       text += `\n${result.duplicatesSkipped} duplicate(s) skipped (already in database).`;
     }
     if (result.discrepanciesFlagged > 0) {
-      text += `\n⚠ ${result.discrepanciesFlagged} row(s) conflict with existing data — awaiting approval on the Approvals page.`;
+      text += `\n⚠ ${result.discrepanciesFlagged} row(s) need approval (serial re-sold without a recorded return, or value differs from an existing row) — see Approvals page.`;
     }
 
-    // Reconciliation
+    // Rejected rows: shown in full, not uploaded
+    let hasRejects = rejectedRows.length > 0;
+    if (hasRejects) {
+      const detail = rejectedRows
+        .map((r) => `  ${r.sheet} • ${r.date} • ${r.model || "?"} • ${r.serial || "?"}\n    → ${r.reason}`)
+        .join("\n");
+      text += `\n\n⛔ ${rejectedRows.length} row(s) REJECTED and NOT uploaded — fix these in the file and re-upload just the corrected rows:\n${detail}`;
+    }
+
+    // Reconciliation (model a): DB should equal ACCEPTED rows; any shortfall ties to rejects/pending
     setStage(pBase + pSpan * 0.85, `${file.name} — reconciling against database...`);
     let hadGhosts = false;
     try {
       const fileTotals = {};
       for (const r of allRecords) {
         const ym = r.transaction_date.substring(0, 7);
-        if (!fileTotals[ym]) {
-          fileTotals[ym] = { net: 0, mrp: 0, qty: 0, rows: 0 };
-        }
+        if (!fileTotals[ym]) fileTotals[ym] = { net: 0, mrp: 0, qty: 0, rows: 0 };
         fileTotals[ym].net += r.net_value;
         fileTotals[ym].mrp += r.mrp;
         fileTotals[ym].qty += r.quantity;
@@ -570,9 +558,7 @@ export default function Upload() {
       }
 
       const monthKeys = Object.keys(fileTotals).sort();
-      const recon = await fetch(
-        `/api/reconcile?storeCode=${uploadStoreCode}&months=${monthKeys.join(",")}`
-      );
+      const recon = await fetch(`/api/reconcile?storeCode=${uploadStoreCode}&months=${monthKeys.join(",")}`);
       const reconResult = await recon.json();
 
       if (recon.ok && reconResult.data) {
@@ -586,31 +572,24 @@ export default function Upload() {
           if (!d) continue;
 
           const diff = d.total_net - f.net;
-
-          monthLines.push(
-            `${ym}: ${f.rows} rows | qty ${f.qty} | MRP ₹${inr(f.mrp)} | Net ₹${inr(f.net)}`
-          );
+          monthLines.push(`${ym}: ${f.rows} rows | qty ${f.qty} | MRP ₹${inr(f.mrp)} | Net ₹${inr(f.net)}`);
 
           if (diff > 1) {
             ghostWarnings.push(
-              `${ym}: database ₹${inr(d.total_net)} vs file ₹${inr(f.net)} (+₹${inr(diff)}, ${d.row_count - f.rows} extra row(s))`
-            );
-          } else if (diff < -1 && result.discrepanciesFlagged > 0) {
-            pendingNotes.push(
-              `${ym}: database is ₹${inr(-diff)} below file — expected, rows are pending approval`
+              `${ym}: database ₹${inr(d.total_net)} vs uploaded ₹${inr(f.net)} (+₹${inr(diff)}, ${d.row_count - f.rows} extra row(s))`
             );
           } else if (diff < -1) {
-            ghostWarnings.push(
-              `${ym}: database ₹${inr(d.total_net)} is BELOW file ₹${inr(f.net)} (−₹${inr(-diff)}) — rows missing from database`
+            pendingNotes.push(
+              `${ym}: database is ₹${inr(-diff)} below uploaded total — accounted for by pending approvals and/or the rejected rows above`
             );
           }
         }
 
-        text += `\nPer month:\n${monthLines.join("\n")}`;
+        text += `\n\nPer month (accepted rows):\n${monthLines.join("\n")}`;
 
         if (ghostWarnings.length > 0) {
           hadGhosts = true;
-          text += `\n🔴 RECONCILIATION MISMATCH:\n${ghostWarnings.join("\n")}\nUse the Investigate button below to see and fix the exact rows.`;
+          text += `\n🔴 RECONCILIATION MISMATCH — database has MORE than you just uploaded:\n${ghostWarnings.join("\n")}\nUse the Investigate button below.`;
           setIntegrityData({
             storeCode: uploadStoreCode,
             months: monthKeys,
@@ -623,22 +602,22 @@ export default function Upload() {
               net_value: r.net_value,
             })),
           });
+        } else if (pendingNotes.length > 0) {
+          text += `\n${pendingNotes.join("\n")}`;
         } else {
-          text += `\n✓ Reconciled: database matches file totals for ${monthKeys.join(", ")}.`;
-          if (pendingNotes.length > 0) {
-            text += `\n${pendingNotes.join("\n")}`;
-          }
+          text += `\n✓ Reconciled: database matches the uploaded rows for ${monthKeys.join(", ")}.`;
         }
       }
     } catch (reconErr) {
       text += `\n(Reconciliation check could not run: ${reconErr.message})`;
     }
 
-    return { ok: !hadGhosts, text };
+    // ok=false if there were rejects (needs attention) or ghosts
+    return { ok: !hasRejects && !hadGhosts, text };
   };
 
   // ---------------------------------------------------------------
-  // Process ONE target file. Returns { ok, text }.
+  // Process ONE target file.
   // ---------------------------------------------------------------
   const processTargetFile = async (file, XLSX, pBase, pSpan) => {
     const buffer = await readFileAsArrayBuffer(file);
@@ -649,7 +628,6 @@ export default function Upload() {
     setStage(pBase + pSpan * 0.3, `${file.name} — parsing target data...`);
 
     const targetRecords = [];
-
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || row.length < 7) continue;
@@ -684,7 +662,6 @@ export default function Upload() {
     setStage(pBase + pSpan * 0.6, `${file.name} — uploading ${targetRecords.length} target records...`);
 
     const userEmail = localStorage.getItem("userEmail") || "unknown";
-
     const response = await fetch("/api/targets-upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -692,11 +669,9 @@ export default function Upload() {
     });
 
     const result = await response.json();
-
     if (!response.ok) {
       return { ok: false, text: `❌ Upload Failed: ${result.error}` };
     }
-
     return { ok: true, text: `✅ Uploaded ${result.recordsInserted} target records` };
   };
 
@@ -789,27 +764,14 @@ export default function Upload() {
         )}
       </div>
 
-      {/* Progress bar */}
       {loading && (
         <div style={{ marginBottom: "1rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.35rem" }}>
             <span style={{ fontSize: "12px", color: "#374151", fontWeight: "600" }}>{progressLabel}</span>
             <span style={{ fontSize: "12px", color: "#6b7280" }}>{progress}%</span>
           </div>
-          <div style={{
-            width: "100%",
-            height: "10px",
-            backgroundColor: "#e5e7eb",
-            borderRadius: "6px",
-            overflow: "hidden",
-          }}>
-            <div style={{
-              width: `${progress}%`,
-              height: "100%",
-              backgroundColor: "#2196F3",
-              borderRadius: "6px",
-              transition: "width 0.3s ease",
-            }} />
+          <div style={{ width: "100%", height: "10px", backgroundColor: "#e5e7eb", borderRadius: "6px", overflow: "hidden" }}>
+            <div style={{ width: `${progress}%`, height: "100%", backgroundColor: "#2196F3", borderRadius: "6px", transition: "width 0.3s ease" }} />
           </div>
         </div>
       )}
@@ -829,33 +791,19 @@ export default function Upload() {
             color:
               messageType === "success" ? "#166534" : messageType === "error" ? "#991b1b" : "#1e40af",
             border:
-              messageType === "success"
-                ? "1px solid #86efac"
-                : messageType === "error"
-                ? "1px solid #fca5a5"
-                : "1px solid #93c5fd",
+              messageType === "success" ? "1px solid #86efac" : messageType === "error" ? "1px solid #fca5a5" : "1px solid #93c5fd",
           }}
         >
           {message}
         </div>
       )}
 
-      {/* Integrity Check panel */}
       {integrityData && !integrityResult && (
         <div style={{ marginBottom: "1.5rem" }}>
           <button
             onClick={runIntegrityCheck}
             disabled={integrityLoading}
-            style={{
-              padding: "0.6rem 1.2rem",
-              backgroundColor: "#dc2626",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "13px",
-              fontWeight: "600",
-            }}
+            style={{ padding: "0.6rem 1.2rem", backgroundColor: "#dc2626", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "13px", fontWeight: "600" }}
           >
             {integrityLoading ? "Checking..." : "🔍 Investigate mismatch"}
           </button>
@@ -863,16 +811,8 @@ export default function Upload() {
       )}
 
       {integrityResult && (
-        <div style={{
-          marginBottom: "1.5rem",
-          border: "1px solid #fca5a5",
-          borderRadius: "8px",
-          padding: "1rem",
-          backgroundColor: "#fff",
-        }}>
-          <h3 style={{ margin: "0 0 0.75rem 0", fontSize: "15px" }}>
-            🔍 Integrity report — {integrityData.storeCode}
-          </h3>
+        <div style={{ marginBottom: "1.5rem", border: "1px solid #fca5a5", borderRadius: "8px", padding: "1rem", backgroundColor: "#fff" }}>
+          <h3 style={{ margin: "0 0 0.75rem 0", fontSize: "15px" }}>🔍 Integrity report — {integrityData.storeCode}</h3>
 
           {integrityResult.ghosts.length > 0 && (
             <>
@@ -888,9 +828,7 @@ export default function Upload() {
                         <input
                           type="checkbox"
                           checked={selectedGhosts.length === integrityResult.ghosts.length}
-                          onChange={(e) =>
-                            setSelectedGhosts(e.target.checked ? integrityResult.ghosts.map((g) => g.id) : [])
-                          }
+                          onChange={(e) => setSelectedGhosts(e.target.checked ? integrityResult.ghosts.map((g) => g.id) : [])}
                         />
                       </th>
                       <th style={{ padding: "6px", textAlign: "left" }}>Date</th>
@@ -905,11 +843,7 @@ export default function Upload() {
                     {integrityResult.ghosts.map((g) => (
                       <tr key={g.id} style={{ borderTop: "1px solid #f3f4f6" }}>
                         <td style={{ padding: "6px" }}>
-                          <input
-                            type="checkbox"
-                            checked={selectedGhosts.includes(g.id)}
-                            onChange={() => toggleGhost(g.id)}
-                          />
+                          <input type="checkbox" checked={selectedGhosts.includes(g.id)} onChange={() => toggleGhost(g.id)} />
                         </td>
                         <td style={{ padding: "6px" }}>{g.transaction_date}</td>
                         <td style={{ padding: "6px" }}>{g.system_invoice_number}</td>
@@ -930,11 +864,9 @@ export default function Upload() {
                     padding: "0.5rem 1rem",
                     backgroundColor: selectedGhosts.length > 0 ? "#dc2626" : "#e5e7eb",
                     color: selectedGhosts.length > 0 ? "white" : "#9ca3af",
-                    border: "none",
-                    borderRadius: "6px",
+                    border: "none", borderRadius: "6px",
                     cursor: selectedGhosts.length > 0 ? "pointer" : "not-allowed",
-                    fontSize: "12px",
-                    fontWeight: "600",
+                    fontSize: "12px", fontWeight: "600",
                   }}
                 >
                   🗑 Delete {selectedGhosts.length} selected row(s)
@@ -949,8 +881,7 @@ export default function Upload() {
 
           {integrityResult.missing.length > 0 && (
             <p style={{ fontSize: "12px", marginTop: "0.75rem", color: "#6b7280" }}>
-              ℹ {integrityResult.missing.length} row(s) in your file are not in the database — these are
-              either pending approval or were held back by validation. No action needed here.
+              ℹ {integrityResult.missing.length} row(s) in your file are not in the database — pending approval or held by validation. No action needed here.
             </p>
           )}
 
@@ -960,64 +891,37 @@ export default function Upload() {
         </div>
       )}
 
-      {/* TAB 1: Upload */}
       {activeTab === "sales" && (
         <div>
           <div style={{ marginBottom: "1.5rem" }}>
-            <label style={{ fontWeight: "bold", marginBottom: "0.5rem", display: "block" }}>
-              Select File Type:
-            </label>
+            <label style={{ fontWeight: "bold", marginBottom: "0.5rem", display: "block" }}>Select File Type:</label>
             <select
               value={fileType}
               onChange={(e) => setFileType(e.target.value)}
-              style={{
-                padding: "0.75rem",
-                borderRadius: "4px",
-                border: "1px solid #ccc",
-                fontSize: "14px",
-                width: "100%",
-                maxWidth: "300px",
-              }}
+              style={{ padding: "0.75rem", borderRadius: "4px", border: "1px solid #ccc", fontSize: "14px", width: "100%", maxWidth: "300px" }}
             >
               <option value="sales">Sales Data File</option>
               <option value="target">Sales Target File</option>
             </select>
           </div>
 
-          <div
-            style={{
-              backgroundColor: "#e3f2fd",
-              padding: "1rem",
-              borderRadius: "4px",
-              marginBottom: "1.5rem",
-              fontSize: "13px",
-              color: "#1565c0",
-            }}
-          >
+          <div style={{ backgroundColor: "#e3f2fd", padding: "1rem", borderRadius: "4px", marginBottom: "1.5rem", fontSize: "13px", color: "#1565c0" }}>
             {fileType === "sales" ? (
               <p>
-                📊 <strong>Sales Data File(s).</strong> You can select multiple files — processed one
-                at a time. Rows are rejected if: the date is unreadable or doesn't match the sheet's
-                month, invoice number is missing, qty is not 1 / -1, or MRP − Net doesn't match the
-                stated Discount. A file with any bad row uploads nothing from that file.
+                📊 <strong>Sales Data File(s).</strong> Select multiple files — processed one at a time.
+                Valid rows upload; any bad rows are listed for you to fix and re-upload. A row is rejected
+                if the date is unreadable or doesn't match its sheet's month, invoice number is missing,
+                qty is not 1 / -1, or MRP − Net doesn't match the stated Discount.
               </p>
             ) : (
               <p>
-                🎯 <strong>Sales Target File(s):</strong> Store Code | Store Name | Month (1-12) |
-                Year | Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty
+                🎯 <strong>Sales Target File(s):</strong> Store Code | Store Name | Month (1-12) | Year |
+                Value Target | Calibre 1 | Qty | Calibre 2 | Qty | Calibre 3 | Qty
               </p>
             )}
           </div>
 
-          <div
-            style={{
-              border: "2px dashed #ccc",
-              padding: "2rem",
-              textAlign: "center",
-              borderRadius: "8px",
-              marginTop: "2rem",
-            }}
-          >
+          <div style={{ border: "2px dashed #ccc", padding: "2rem", textAlign: "center", borderRadius: "8px", marginTop: "2rem" }}>
             <input
               type="file"
               multiple
@@ -1029,62 +933,34 @@ export default function Upload() {
         </div>
       )}
 
-      {/* TAB 2: Manage Targets */}
       {activeTab === "targets" && (
         <div>
-          <div
-            style={{
-              backgroundColor: "#f5f5f5",
-              padding: "1.5rem",
-              borderRadius: "8px",
-              marginBottom: "2rem",
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-              gap: "1rem",
-            }}
-          >
+          <div style={{ backgroundColor: "#f5f5f5", padding: "1.5rem", borderRadius: "8px", marginBottom: "2rem", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem" }}>
             <div>
               <label>Store:</label>
               <select value={filterStore} onChange={(e) => setFilterStore(e.target.value)}>
                 <option value="all">All Stores</option>
-                {stores.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
+                {stores.map((s) => (<option key={s} value={s}>{s}</option>))}
               </select>
             </div>
-
             <div>
               <label>Month:</label>
               <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
                 <option value="all">All Months</option>
-                {months.map((m) => (
-                  <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
-                ))}
+                {months.map((m) => (<option key={m} value={m}>{String(m).padStart(2, "0")}</option>))}
               </select>
             </div>
-
             <div>
               <label>Year:</label>
               <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
                 <option value="all">All Years</option>
-                {years.map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
+                {years.map((y) => (<option key={y} value={y}>{y}</option>))}
               </select>
             </div>
           </div>
 
           {targetsError && (
-            <div
-              style={{
-                padding: "1rem",
-                marginBottom: "1rem",
-                borderRadius: "4px",
-                backgroundColor: "#fee2e2",
-                color: "#991b1b",
-                border: "1px solid #fca5a5",
-              }}
-            >
+            <div style={{ padding: "1rem", marginBottom: "1rem", borderRadius: "4px", backgroundColor: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}>
               ❌ {targetsError}
             </div>
           )}
@@ -1125,15 +1001,7 @@ export default function Upload() {
                       <td style={{ padding: "8px", border: "1px solid #ddd", textAlign: "center", whiteSpace: "nowrap" }}>
                         <button
                           onClick={() => handleDeleteTarget(target.id)}
-                          style={{
-                            padding: "4px 8px",
-                            backgroundColor: "#f44336",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "3px",
-                            cursor: "pointer",
-                            fontSize: "11px",
-                          }}
+                          style={{ padding: "4px 8px", backgroundColor: "#f44336", color: "white", border: "none", borderRadius: "3px", cursor: "pointer", fontSize: "11px" }}
                         >
                           Delete
                         </button>
@@ -1153,22 +1021,11 @@ export default function Upload() {
         </div>
       )}
 
-      {/* TAB 3: Download Data (admin only) */}
       {activeTab === "download" && userRole === "admin" && (
         <div>
-          <div
-            style={{
-              backgroundColor: "#e3f2fd",
-              padding: "1rem",
-              borderRadius: "4px",
-              marginBottom: "1.5rem",
-              fontSize: "13px",
-              color: "#1565c0",
-            }}
-          >
+          <div style={{ backgroundColor: "#e3f2fd", padding: "1rem", borderRadius: "4px", marginBottom: "1.5rem", fontSize: "13px", color: "#1565c0" }}>
             <p>
-              📥 <strong>Consolidated Sales Data (CSV).</strong> Tick stores to include —
-              leave all unticked to download every store. Dates optional.
+              📥 <strong>Consolidated Sales Data (CSV).</strong> Tick stores to include — leave all unticked to download every store. Dates optional.
             </p>
           </div>
 
@@ -1178,40 +1035,15 @@ export default function Upload() {
                 Stores {exportStores.length > 0 ? `(${exportStores.length} selected)` : "(all)"}
               </label>
               <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button
-                  onClick={() => setExportStores([...VALID_STORE_CODES])}
-                  style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #ccc", borderRadius: "4px", cursor: "pointer", backgroundColor: "white" }}
-                >
-                  Select all
-                </button>
-                <button
-                  onClick={() => setExportStores([])}
-                  style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #ccc", borderRadius: "4px", cursor: "pointer", backgroundColor: "white" }}
-                >
-                  Clear
-                </button>
+                <button onClick={() => setExportStores([...VALID_STORE_CODES])} style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #ccc", borderRadius: "4px", cursor: "pointer", backgroundColor: "white" }}>Select all</button>
+                <button onClick={() => setExportStores([])} style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #ccc", borderRadius: "4px", cursor: "pointer", backgroundColor: "white" }}>Clear</button>
               </div>
             </div>
 
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-              gap: "0.4rem",
-              maxHeight: "220px",
-              overflowY: "auto",
-              backgroundColor: "white",
-              border: "1px solid #ddd",
-              borderRadius: "6px",
-              padding: "0.75rem",
-              marginBottom: "1.25rem",
-            }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "0.4rem", maxHeight: "220px", overflowY: "auto", backgroundColor: "white", border: "1px solid #ddd", borderRadius: "6px", padding: "0.75rem", marginBottom: "1.25rem" }}>
               {VALID_STORE_CODES.slice().sort().map((code) => (
                 <label key={code} style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "12px", cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={exportStores.includes(code)}
-                    onChange={() => toggleExportStore(code)}
-                  />
+                  <input type="checkbox" checked={exportStores.includes(code)} onChange={() => toggleExportStore(code)} />
                   {code}
                 </label>
               ))}
@@ -1220,37 +1052,14 @@ export default function Upload() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "1rem", alignItems: "end" }}>
               <div>
                 <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>From (optional)</label>
-                <input
-                  type="date"
-                  value={exportStart}
-                  onChange={(e) => setExportStart(e.target.value)}
-                  style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
-                />
+                <input type="date" value={exportStart} onChange={(e) => setExportStart(e.target.value)} style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }} />
               </div>
               <div>
                 <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "13px", fontWeight: "600" }}>To (optional)</label>
-                <input
-                  type="date"
-                  value={exportEnd}
-                  onChange={(e) => setExportEnd(e.target.value)}
-                  style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }}
-                />
+                <input type="date" value={exportEnd} onChange={(e) => setExportEnd(e.target.value)} style={{ width: "100%", padding: "0.6rem", borderRadius: "4px", border: "1px solid #ccc" }} />
               </div>
               <div>
-                <button
-                  onClick={handleDownload}
-                  style={{
-                    width: "100%",
-                    padding: "0.7rem 1rem",
-                    backgroundColor: "#2196F3",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                  }}
-                >
+                <button onClick={handleDownload} style={{ width: "100%", padding: "0.7rem 1rem", backgroundColor: "#2196F3", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "14px", fontWeight: "600" }}>
                   📥 Download CSV
                 </button>
               </div>
